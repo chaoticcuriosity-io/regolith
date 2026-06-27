@@ -37,7 +37,7 @@ from training.model import build_model  # noqa: E402
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
-# Canonical palette — identical to outputs/make_figures.py so real-image
+# Canonical palette — used by both eval_synth.py and eval_real.py so real-image
 # overlays match the synthetic ablation figures already in the report.
 #   regolith = tan, rock = RED (the hazard class), sky = blue, ignore = black
 PALETTE: dict[int, tuple[int, int, int]] = {

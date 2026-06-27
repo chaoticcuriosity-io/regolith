@@ -37,7 +37,7 @@ To run anything yourself, see the ops manual: [`docs/dgx-spark-regolith-manual.m
 | `training/` | SegFormer fine-tuning — dataset loader, model, metrics, train loop |
 | `eval/` | Evaluation on synthetic hold-out and real lunar imagery |
 | `render/` | Cinematic RTX render with predicted segmentation overlaid |
-| `scripts/` | Ops helpers — memory management, end-to-end reproduce |
+| `scripts/` | Ops helpers — memory management (`free_memory.sh`), dataset assembly (`generate_all.sh`); per-step reproduce commands live in each chapter's `## Reproduce` block |
 | `docs/` | GitHub Pages source + DGX Spark ops manual |
 
 ---
@@ -65,7 +65,7 @@ To run anything yourself, see the ops manual: [`docs/dgx-spark-regolith-manual.m
 | **DR, size-matched** | **750** | **0.788** | **+0.099** |
 | DR-1500 (full set) | 1,500 | 0.815 | +0.126 |
 
-Measured on `test_photoreal` — 300 frames with sun elevation, albedo, terrain, and camera parameters all shifted *outside* the training distribution. The size-matched comparison (`dr_750` vs `nodr_750`) isolates domain randomization from dataset size; the +0.099 gain is pure DR. DR beats no-DR on **267 of 300** test frames.
+Measured on `test_photoreal` — 300 frames with sun elevation, albedo, terrain, and camera parameters all shifted *outside* the training distribution. The size-matched comparison (`dr_750` vs `nodr_750`) isolates domain randomization from dataset size; the +0.099 gain is pure DR. DR beats no-DR on **267 of 300** test frames (mean per-frame rock-IoU gain: +0.0765). Per-frame results are committed to [`docs/reports/assets/ablation-perframe.json`](docs/reports/assets/ablation-perframe.json).
 
 ![Bar chart of rock-IoU: no-DR 750 at 0.689, DR 750 at 0.788 (+0.099), DR-1500 at 0.815](docs/reports/assets/ablation-rockiou.png)
 

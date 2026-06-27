@@ -2,7 +2,7 @@
 
 Real lunar imagery dataset support for sim-to-real evaluation. Fetches the **Artificial Lunar Rocky Landscape Dataset** (Kaggle), maps its mask palette to regolith canonical class IDs, and documents the sim-to-real evaluation split.
 
-*Part of the [regolith](../..) demo — lunar hazard segmentation from 100% synthetic data. Task 4: sim-to-real evaluation.*
+*Part of the [regolith](../..) demo — lunar hazard segmentation from 100% synthetic data. See [chapter 04 — sim-to-real](../../docs/reports/04-sim-to-real.md) for the evaluation.*
 
 ---
 
@@ -108,7 +108,7 @@ ssh spark 'unzip /workspace/datasets/artificial-lunar-rocky-landscape-dataset.zi
     -d /workspace/datasets/lunar_landscape'
 ```
 
-**Verify the palette** after first download (Task 4 step):
+**Verify the palette** after first download:
 
 ```python
 import numpy as np

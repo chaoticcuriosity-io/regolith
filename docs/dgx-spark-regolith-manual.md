@@ -55,7 +55,7 @@ ssh spark "docker start open-webui ollama-compose compose-arangodb-1"
 
 ## 4. Running regolith pipeline steps
 
-All pipeline steps run inside a Docker container on the Spark. Base image: `nvcr.io/nvidia/pytorch:26.03-py3`. The actual container name is set in Task 1 (see `setup-notes.md`).
+All pipeline steps run inside a Docker container on the Spark. Base image: `nvcr.io/nvidia/pytorch:26.03-py3`. The training container is `regolith-train` (see `setup-notes.md` for full history).
 
 General pattern:
 

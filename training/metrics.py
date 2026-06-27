@@ -15,6 +15,8 @@ so they can run in any environment that has NumPy installed.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
 
@@ -76,7 +78,10 @@ def mean_iou(pred: np.ndarray, label: np.ndarray, num_classes: int = 3) -> float
         dtype=np.float64,
     )
     # np.nanmean returns nan if all values are nan — exactly what we want.
-    return float(np.nanmean(ious))
+    # Suppress the RuntimeWarning emitted when the slice is all-NaN.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        return float(np.nanmean(ious))
 
 
 def confusion_counts(

@@ -2,8 +2,7 @@
 eval_real.py — run trained checkpoints on REAL lunar surface photographs.
 
 This is the genuine sim-to-real test. The model was trained only on synthetic
-renders (chapters 02-03); here we point it at real Apollo / Surveyor surface
-photos (NASA, public domain — see eval/real_images/sources.md) and look at what
+renders (chapters 02-03); here we point it at real Apollo surface photos (NASA, public domain — see eval/real_images/sources.md) and look at what
 it predicts. There is NO ground truth for these images, so the output is
 QUALITATIVE: colored overlays, not an IoU. (Fabricating an IoU on unlabeled real
 images would be dishonest — don't.)

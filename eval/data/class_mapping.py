@@ -33,7 +33,8 @@ Our canonical class IDs (must match training config)
   sky      : 2
   ignore   : 255
 
-TODO (Task 4, palette confirmation)
+Note: the labeled Kaggle set was not downloaded (no credentials). Confirm the palette
+against real files before using.
 ------------------------------------
 When the dataset is first downloaded to the Spark, call verify_palette() on a sample
 of masks to confirm the exact RGB tuples — particularly that:

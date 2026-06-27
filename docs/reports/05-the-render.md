@@ -100,7 +100,11 @@ The mean predicted rock fraction across all 142 frames is **~6.9%**, consistent 
 
 ![Hero still — opening frame with boulders at mid-distance, long low-sun shadows raking across the scene, rock detection outlines visible on the larger near-field boulders](assets/render-hero-1.png)
 
+![Hero still — early approach, camera closing on the boulder field; shadow geometry lengthens and near-field detection outlines sharpen](assets/render-hero-2.png)
+
 ![Hero still — mid-approach, foreground boulders now filling a significant portion of the frame, dense red detection overlay, green regolith floor visible between rocks](assets/render-hero-3.png)
+
+![Hero still — late approach, foreground boulders dominating the frame; rock fraction near 9%, detection overlay dense on the near-field mass](assets/render-hero-4.png)
 
 ---
 
