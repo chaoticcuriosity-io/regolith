@@ -1,26 +1,64 @@
-# Dockerfile_DGX_Spark
+# Dockerfile_DGX_Spark — Isaac Sim + Replicator for the regolith pipeline
 #
-# TODO: fill from Task 1 Isaac setup results.
+# IMPORTANT — we run NVIDIA's prebuilt Isaac Sim image directly; we do NOT build our
+# own image. Pull this tag and invoke it with scripts/run_isaac.sh.
 #
-# Planned base: nvcr.io/nvidia/pytorch:26.03-py3
-# Platform target: linux/arm64 (aarch64, sm_121)
-# Will add: Isaac Lab, Omniverse Replicator, SegFormer / HuggingFace deps
+#   Image:    nvcr.io/nvidia/isaac-sim:6.0.0
+#   Version:  6.0.0-rc.59+release.41464
+#   Platform: multi-arch manifest — pulls linux/arm64 automatically on the DGX Spark
+#             (aarch64/GB10), linux/amd64 on x86 dev machines.
+#   Access:   public — no NGC login required.
+#   Size:     17.6 GB on disk; allow ~7 min for first pull.
 #
-# Hardware context:
+# Do NOT change the pinned tag without re-running the smoke test
+# (see setup-notes.md ## Session 2 and replicator/_smoke_render.py).
+#
+# ── Headless invocation ────────────────────────────────────────────────────────
+#
+#   /isaac-sim/python.sh <script.py>
+#
+#   This wrapper sets PYTHONPATH, LD_LIBRARY_PATH, and all Omniverse/CarB env vars
+#   before launching the embedded Python interpreter. Always use it — do NOT call
+#   python3 directly or Replicator extensions will not initialise.
+#
+#   Full launch command (handled by scripts/run_isaac.sh):
+#
+#     docker run --entrypoint bash --gpus all --network=host --rm \
+#       -e ACCEPT_EULA=Y -e PRIVACY_CONSENT=Y \
+#       -v <host-script>:/workspace/<script>:ro \
+#       -v <host-out-dir>:/workspace/out:rw \
+#       nvcr.io/nvidia/isaac-sim:6.0.0 \
+#       -lc "/isaac-sim/python.sh /workspace/<script>"
+#
+# ── Load-bearing gotchas (validated 2026-06-26 on DGX Spark / GB10 / sm_121) ──
+#
+#   1. DO NOT bind-mount /isaac-sim/.cache from the host.
+#      Container runs as uid 1234 (user "isaac-sim"). A host-owned bind-mount at
+#      that exact path triggers PermissionError in wp.init() (NVIDIA Warp), aborting
+#      extension startup and cascading into misleading downstream errors:
+#        - "No writer 'BasicWriter'"
+#        - "OgnRefTimeGate TypeError"
+#        - rep.orchestrator becomes NoneType
+#      For shader-cache persistence (eliminates the ~150 s first-frame penalty on
+#      reruns), mount a SEPARATE host dir that is chmod 777 and point the container
+#      at it — do not reuse /isaac-sim/.cache.
+#
+#   2. Use poll-for-files drain, not bare wait_until_complete().
+#      The first RTX frame on the DGX Spark (GB10/sm_121) takes ~150 s.
+#      rep.orchestrator.wait_until_complete()'s internal drain timeout fires before
+#      the frame lands, leaving the output directory empty. After
+#      rep.orchestrator.step(), pump simulation_app.update() in a loop and poll the
+#      output directory for PNGs (budget: 180 s). Call wait_until_complete() only
+#      after at least 2 PNG files are confirmed present.
+#      See replicator/_smoke_render.py for the reference implementation.
+#
+# ── Hardware context ───────────────────────────────────────────────────────────
+#
 #   NVIDIA DGX Spark (GB10 Grace Blackwell, aarch64, CUDA 13, sm_121,
-#   128 GB unified memory — nvidia-smi reports VRAM as N/A, which is expected)
+#   128 GB unified memory — nvidia-smi reports VRAM as N/A, which is expected).
+#   PhysX-GPU and RTX work out of the box inside this container on sm_121 —
+#   no source builds, no TORCH_CUDA_ARCH_LIST, no X11 headers needed.
 #
-# Build notes (captured here for Task 1):
-#   - TORCH_CUDA_ARCH_LIST="12.1" for all CUDA extension builds
-#   - pip install --no-build-isolation (build needs the container's torch)
-#   - Add #include <cstdint> to any source using uint32_t/uintptr_t (CUDA 13)
-#
-# See setup-notes.md ## Session 2 for the actual install log once Task 1 runs.
+# See setup-notes.md ## Session 2 and docs/dgx-spark-regolith-manual.md § 7.
 
-FROM nvcr.io/nvidia/pytorch:26.03-py3
-
-# --- placeholder: Task 1 will fill this in ---
-
-# WORKDIR /workspace/regolith
-# COPY . .
-# RUN pip install --no-build-isolation -r requirements.txt
+FROM nvcr.io/nvidia/isaac-sim:6.0.0

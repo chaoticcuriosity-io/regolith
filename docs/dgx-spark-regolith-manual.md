@@ -67,7 +67,74 @@ Step-by-step reproduce commands live in the `## Reproduce` section of each chapt
 
 ---
 
-## 5. CUDA extension build notes
+## 5. Run Isaac Sim + Replicator
+
+> **Sister document:** `setup-notes.md ## Session 2` has the full session log, all six
+> gotchas with root causes, and the downstream segmentation-format decision.
+
+### Pinned image
+
+```
+nvcr.io/nvidia/isaac-sim:6.0.0
+```
+
+Multi-arch manifest: pulls `linux/arm64` automatically on the Spark. Public — no NGC
+login required. Do not change the tag without re-running the smoke test.
+
+### Step-by-step
+
+**Step 1 — Free memory:**
+
+```bash
+bash scripts/free_memory.sh
+```
+
+This stops open-webui, ollama-compose, and compose-arangodb-1 (see co-tenant table in
+§ 2), prints `free -h`, and exits non-zero if available memory is below 100 GiB.
+Isaac Sim peaked at ~8.3 GiB on the validated run; keep ≥110 GiB free as usual.
+
+**Step 2 — Run Isaac Sim:**
+
+```bash
+bash scripts/run_isaac.sh <host-script-path> <host-output-dir>
+```
+
+Both paths are on the Spark host. The script mounts the Python script read-only and the
+output dir read-write, then runs `/isaac-sim/python.sh <script>` inside the container.
+The output dir is created and `chmod 777`'d automatically (required — see Warning 1 below).
+
+Example using the smoke script:
+
+```bash
+bash scripts/run_isaac.sh \
+  /home/chaotic-curiosity/regolith/replicator/_smoke_render.py \
+  /home/chaotic-curiosity/regolith_out
+```
+
+**Step 3 — Restart co-tenants:**
+
+```bash
+docker start open-webui ollama-compose compose-arangodb-1
+```
+
+### Warnings
+
+> **Warning — do NOT bind-mount `/isaac-sim/.cache`.**
+> Container runs as uid 1234. A host-owned bind-mount at that path triggers
+> `PermissionError` in `wp.init()` (NVIDIA Warp), aborting extension startup and
+> cascading into misleading errors ("No writer 'BasicWriter'", orchestrator NoneType).
+> `scripts/run_isaac.sh` deliberately omits this mount. Do not add it.
+
+> **Warning — use poll-for-files drain, not bare `wait_until_complete()`.**
+> First RTX frame on the Spark takes ~150 s. `wait_until_complete()`'s internal timeout
+> fires before the frame lands → zero output files. The reference script
+> `replicator/_smoke_render.py` implements the correct pattern: pump
+> `simulation_app.update()` and poll the output dir for PNGs (180 s budget) before
+> calling `wait_until_complete()`.
+
+---
+
+## 6. CUDA extension build notes
 
 When building CUDA extensions from source inside the container:
 
@@ -79,7 +146,7 @@ On CUDA 13, any source that uses `uint32_t` or `uintptr_t` needs `#include <cstd
 
 ---
 
-## 6. Port forwarding (web viewers)
+## 7. Port forwarding (web viewers)
 
 `open-webui` occupies host port 8080. For Omniverse/Viser web viewers:
 
