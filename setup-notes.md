@@ -162,3 +162,135 @@ ssh spark "find /home/chaotic-curiosity/regolith_smoke_out -name '*.png' | sort"
 # 4. Restart co-tenants
 ssh spark "docker start open-webui ollama-compose compose-arangodb-1"
 ```
+
+---
+
+## Session 3 — 2026-06-27 — the lunar stage (`scene/build_lunar_stage.py`)
+
+### Goal
+
+Task 1 (USD scene): implement `build_lunar_stage(seed)` — a procedural, asset-free
+lunar scene (displaced regolith heightfield + noise-deformed rock scatter + harsh
+low-sun + near-black star dome + rover camera) tagged with USD Semantics, plus a
+`__main__` that renders one validated 3-class frame at 1024×1024. Live on the Spark.
+
+### Result
+
+**SUCCESS.** One 1024×1024 RGB + raw integer label-id mask + colorized preview, all
+three classes present, no unlabeled pixels. Reference frames committed to
+`docs/reports/assets/scene-reference-{rgb,seg}.png` (the first real lunar frames).
+
+Per-class pixel counts (seed 42, canonical map `{regolith:0, rock:1, sky:2}`):
+
+```
+regolith  id=0 :  476877 px (45.48%)
+rock      id=1 :   62360 px ( 5.95%)   <- hazard coverage, in the 3–50% sane band
+sky       id=2 :  509339 px (48.57%)
+UNLABELED      :       0 px ( 0.00%)
+unique values  : [0, 1, 2]
+RGB mean=104.5  p99=240  max=252  (lit, not black)
+```
+
+Render time: **~21 s warm** (hot shader cache), **~160 s cold** (first SimulationApp
+init = RTX shader compile). Persistent dev container + chmod-777 cache mount made the
+edit→render loop ~21 s per iteration.
+
+### Scene design (all procedural / numpy — no external assets)
+
+- **Regolith:** 920 m × 920 m grid (300×300 cells ≈ 3 m), fBm value-noise displacement
+  + a few parabolic-bowl-with-rim craters; per-vertex normals from the height gradient;
+  low-albedo gray `UsdPreviewSurface` (diffuse 0.22, roughness 0.96). Class `regolith`.
+- **Rocks:** ~76 noise-deformed icospheres (subdiv-2, radial-sinusoid lumps), random
+  non-uniform scale / rotation / placement, partially embedded; ~12 deliberate near-field
+  boulders guarantee sane coverage. Class `rock`.
+- **Sun:** one `UsdLux.DistantLight`, elevation 17°, azimuth 120°, intensity 14000,
+  angle 0.53° (crisp shadows). Behind the camera → long shadows reach toward the lens.
+- **Sky:** emissive near-black dome **mesh** (radius 600) with a 34° cap cut out around
+  the sun; stars = tiny emissive spheres biased to the camera's view. Class `sky`.
+- **Camera:** `/World/RoverCam` at (0, −90, 2.0) m eye height looking +Y across the
+  terrain toward the horizon; ~62° FOV (focal 20 / aperture 24).
+
+### Run pattern (one render product, TWO sequential passes — see Gotcha 7)
+
+```
+SMOKE_OUT=/workspace/out /isaac-sim/python.sh \
+  /workspace/regolith/scene/build_lunar_stage.py --seed 42 --out /workspace/out
+```
+Pass A: `BasicWriter(rgb=True, semantic_segmentation=True, colorize=False)` → `out/labelid/`
+(RGB + raw label-id PNG + int→class JSON). Pass B: `BasicWriter(semantic_segmentation=True,
+colorize=True)` → `out/preview/` (colorized seg). The poll-for-files drain from Session 2
+is reused for each pass.
+
+### New gotchas (Task 1 scene authoring)
+
+**Gotcha 7 — two BasicWriters share ONE semantic_segmentation annotator.**
+The annotator lives once in the SDG pipeline (`/Render/PostProcess/SDGPipeline/
+Replicator_semantic_segmentation`); its `colorize` flag is **global**. Attaching a
+`colorize=False` writer and a `colorize=True` writer *simultaneously* (even on separate
+render products) makes the second silently flip the first ("Annotator … already attached.
+Modifying `colorize` from `False` to `True`") → the raw mask is corrupted/blank. Fix:
+render **two sequential passes** — attach → step → drain → detach, then repeat.
+
+**Gotcha 8 — a fully-enclosing sky dome occludes the DistantLight → all-black scene.**
+A `DistantLight` is at infinity; every sun shadow ray from the terrain hits the
+enclosing dome first → 100 % shadow → only emissive stars render. Fix: cut a spherical
+cap (≈34°) out of the dome around the **sun** direction so shadow rays escape. Works
+here because the sun is behind the camera (azimuth 120°, camera looks +Y) — the hole is
+118° off the optical axis and never enters the ~44° half-diagonal frustum, so the camera
+still sees only dome = sky (verified: 0 unlabeled pixels).
+
+**Gotcha 9 — sun through the hole flares a Fresnel highlight on the far dome interior.**
+Rays passing through the cap graze the camera-facing dome interior; even with
+`diffuseColor=0`, UsdPreviewSurface's metallic-workflow dielectric specular (F0≈0.04)
+blows up at grazing angles → a bright gray "sky" patch at the horizon. Fix: author the
+sky material **unlit** — `useSpecularWorkflow=1` + `specularColor=(0,0,0)` +
+`diffuseColor=0` + emissive — so it renders its emissive color regardless of lighting.
+
+**Gotcha 10 — `Gf.Vec3f(numpy.float32, …)` raises `Boost.Python.ArgumentError`.**
+Boost wants native Python floats. Cast numpy scalars: `Gf.Vec3f(float(a), float(b), float(c))`.
+(Conversely, `Vt.Vec3fArray(np_float32_Nx3)` / `Vt.IntArray(np_int32)` *do* accept numpy
+arrays — used for the 90k-vertex mesh points/indices.)
+
+**Note — Replicator label-ids ≠ canonical class ids.** BasicWriter auto-assigns
+`0=BACKGROUND, 1=UNLABELLED, 2=sky, 3=rock, 4=regolith` (reserves 0/1). The labels JSON
+(`semantic_segmentation_labels_*.json`, keyed by id when `colorize=False`) must be parsed
+to remap to the project's `{regolith:0, rock:1, sky:2}`. `build_lunar_stage.py` does this
+remap in `_verify_and_report()` and writes `semantic_segmentation_classid.png`.
+
+**Semantics that Replicator reads:** `isaacsim.core.utils.semantics.add_update_semantics(
+prim, semantic_label=..., type_label="class")` (legacy `pxr.Semantics.SemanticsAPI` is the
+fallback). Verified to populate the BasicWriter masks.
+
+### Artifacts left on the Spark
+
+- `/home/chaotic-curiosity/regolith/scene/build_lunar_stage.py` — synced scene script
+- `/home/chaotic-curiosity/regolith_scene_out/labelid/` — rgb + raw label-id PNG + JSON +
+  `semantic_segmentation_classid.png` (canonical) + `semantic_preview_colormap.png`
+- `/home/chaotic-curiosity/regolith_scene_out/preview/` — colorized seg
+- `/home/chaotic-curiosity/regolith_cache/` — persistent chmod-777 shader/Warp cache
+- `/home/chaotic-curiosity/isaac_scene.log` — full stdout/stderr
+
+### Reproduce
+
+```bash
+# 1. Free memory
+ssh spark "bash /home/chaotic-curiosity/regolith/scripts/free_memory.sh"
+
+# 2. Persistent dev container with a warm shader cache (chmod-777 host dir at /isaac-sim/.cache)
+ssh spark "mkdir -p /home/chaotic-curiosity/regolith_cache /home/chaotic-curiosity/regolith_scene_out \
+  && chmod 777 /home/chaotic-curiosity/regolith_cache /home/chaotic-curiosity/regolith_scene_out \
+  && docker run -d --name isaac-dev --entrypoint bash --gpus all --network=host \
+       -e ACCEPT_EULA=Y -e PRIVACY_CONSENT=Y \
+       -v /home/chaotic-curiosity/regolith:/workspace/regolith:rw \
+       -v /home/chaotic-curiosity/regolith_scene_out:/workspace/out:rw \
+       -v /home/chaotic-curiosity/regolith_cache:/isaac-sim/.cache:rw \
+       nvcr.io/nvidia/isaac-sim:6.0.0 -lc 'sleep infinity'"
+
+# 3. Render one validation frame (container uid 1234 owns its outputs — clean them inside)
+ssh spark "docker exec isaac-dev bash -lc 'rm -rf /workspace/out/labelid /workspace/out/preview; \
+  SMOKE_OUT=/workspace/out /isaac-sim/python.sh \
+  /workspace/regolith/scene/build_lunar_stage.py --seed 42 --out /workspace/out'"
+
+# 4. Tear down + restart co-tenants
+ssh spark "docker rm -f isaac-dev; docker start open-webui ollama-compose compose-arangodb-1"
+```
