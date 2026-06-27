@@ -32,7 +32,7 @@ To build the synthetic lunar world, we use two pieces of NVIDIA infrastructure:
 
 **OpenUSD** (Universal Scene Description) is a file format and API, originally developed by Pixar, for describing 3D scenes. Think of it as the "source of truth" for geometry, materials, lights, and cameras. Everything in our scene — the rock-strewn regolith, the sun, the rover camera — lives in a USD file.
 
-**NVIDIA Omniverse Replicator** is a Python library that wraps NVIDIA's Omniverse simulation platform and automates the process of generating datasets. You describe what you want varied (lighting angle, rock placement, surface texture), and Replicator renders thousands of frames — each with paired RGB images *and* perfect semantic segmentation masks.
+**NVIDIA Omniverse Replicator** is a Python framework built into NVIDIA Omniverse (it ships as part of Isaac Sim) that automates the process of generating datasets. You describe what you want varied (lighting angle, rock placement, surface texture), and Replicator renders thousands of frames — each with paired RGB images *and* perfect semantic segmentation masks.
 
 We render once, label nothing, and get a training set.
 

@@ -4,7 +4,7 @@ This file is the running record of what we actually did — gotchas, deviations,
 
 ---
 
-## Session 1 — 2026-06-26 — scaffold + Isaac smoke
+## Session 1 — 2026-06-26 — scaffold
 
 ### Goal
 Task 0: scaffold the repo (house-style learning series + pipeline code skeleton), push as private GitHub repo. Task 1 (Isaac Lab setup smoke test) is the next session.

@@ -27,6 +27,8 @@ from typing import Tuple
 # from PIL import Image
 
 
+# from torch.utils.data import Dataset
+# class SyntheticLunarDataset(Dataset):  # TODO(Task 3): uncomment inheritance; fill __len__/__getitem__
 class SyntheticLunarDataset:
     """PyTorch Dataset yielding (image, mask) pairs from a synthetic lunar dataset.
 
