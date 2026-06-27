@@ -1,0 +1,19 @@
+.env
+.env.*
+*.key
+*.pt
+*.gguf
+*.safetensors
+*.usd
+*.usdc
+outputs/
+checkpoints/
+datasets/
+logs/
+__pycache__/
+*.pyc
+.claude/
+CLAUDE.md
+# re-include report embeds
+!docs/reports/assets/
+!docs/reports/assets/**

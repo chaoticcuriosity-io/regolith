@@ -1,0 +1,26 @@
+# Dockerfile_DGX_Spark
+#
+# TODO: fill from Task 1 Isaac setup results.
+#
+# Planned base: nvcr.io/nvidia/pytorch:26.03-py3
+# Platform target: linux/arm64 (aarch64, sm_121)
+# Will add: Isaac Lab, Omniverse Replicator, SegFormer / HuggingFace deps
+#
+# Hardware context:
+#   NVIDIA DGX Spark (GB10 Grace Blackwell, aarch64, CUDA 13, sm_121,
+#   128 GB unified memory — nvidia-smi reports VRAM as N/A, which is expected)
+#
+# Build notes (captured here for Task 1):
+#   - TORCH_CUDA_ARCH_LIST="12.1" for all CUDA extension builds
+#   - pip install --no-build-isolation (build needs the container's torch)
+#   - Add #include <cstdint> to any source using uint32_t/uintptr_t (CUDA 13)
+#
+# See setup-notes.md ## Session 2 for the actual install log once Task 1 runs.
+
+FROM nvcr.io/nvidia/pytorch:26.03-py3
+
+# --- placeholder: Task 1 will fill this in ---
+
+# WORKDIR /workspace/regolith
+# COPY . .
+# RUN pip install --no-build-isolation -r requirements.txt

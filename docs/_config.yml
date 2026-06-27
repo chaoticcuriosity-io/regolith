@@ -1,0 +1,3 @@
+theme: jekyll-theme-cayman
+title: "Lunar hazard detection from synthetic data"
+description: "A hands-on, zero-background guide to synthetic data + sim-to-real on an NVIDIA DGX Spark"

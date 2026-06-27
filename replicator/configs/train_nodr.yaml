@@ -1,0 +1,30 @@
+# train_nodr.yaml — training split WITHOUT domain randomization (ablation baseline)
+#
+# Use this config to train a model on fixed-condition synthetic data.
+# Comparing this model vs the train_dr model in eval/eval_real.py
+# shows what domain randomization actually bought us.
+
+seed: 42
+
+# Sun — fixed conditions, no randomization
+sun_elevation_deg: [45, 45]     # single angle (no-op range = fixed)
+sun_azimuth_deg: [135, 135]     # fixed direction
+sun_intensity: [100000, 100000] # fixed intensity
+
+# Regolith — fixed
+regolith_albedo: [0.10, 0.10]   # single value
+
+# Rocks — count and scale still vary (they're not domain-style variations)
+rock_count: [30, 50]
+rock_scale: [0.1, 1.0]
+
+# Camera — fixed pose
+camera_fov_deg: [70, 70]
+camera_pose_delta:
+  translation_m: 0.0
+  rotation_deg: 0.0
+
+# Output
+output:
+  types: [rgb, semantic_segmentation, instance, distance_to_camera]
+  image_size: [1280, 720]

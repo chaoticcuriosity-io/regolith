@@ -1,0 +1,36 @@
+# train_dr.yaml — training split with domain randomization (the main training config)
+#
+# Use this config for generate_dataset.py to produce the training dataset.
+# Domain randomization is wide: covers the full plausible range of
+# lunar lighting, texture, and geometry variation.
+
+seed: 42
+
+# Sun
+sun_elevation_deg: [5, 85]      # grazing to overhead
+sun_azimuth_deg: [0, 360]       # all directions
+sun_intensity: [50000, 150000]  # nits
+
+# Regolith
+regolith_albedo: [0.05, 0.20]   # dark basaltic to bright highland
+# regolith_texture_paths:       # TODO (Task 1): fill with asset paths on Spark
+#   - /workspace/assets/textures/regolith_01.png
+#   - /workspace/assets/textures/regolith_02.png
+
+# Rocks
+rock_count: [10, 80]            # per frame
+rock_scale: [0.05, 1.5]        # meters (normalized; actual scale set in scene)
+# rock_mesh_paths:              # TODO (Task 1): fill with USD rock asset paths
+#   - /workspace/assets/rocks/rock_a.usd
+#   - /workspace/assets/rocks/rock_b.usd
+
+# Camera
+camera_fov_deg: [55, 85]
+camera_pose_delta:              # small random offset from /World/RoverCam base pose
+  translation_m: 0.1
+  rotation_deg: 5.0
+
+# Output
+output:
+  types: [rgb, semantic_segmentation, instance, distance_to_camera]
+  image_size: [1280, 720]
