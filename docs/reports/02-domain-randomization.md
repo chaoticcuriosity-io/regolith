@@ -209,4 +209,4 @@ ssh spark "cat /home/chaotic-curiosity/regolith_data/{train_dr,train_nodr,test_p
 - `test_photoreal` uses unseen sun elevation, albedo, roughness, terrain, and camera parameters — the domain-gap stress test.
 - Rock class fraction runs 1–8% across training frames — the imbalance is real and will be up-weighted in the loss.
 
-Continue to [03 — Training the model](03-training.md) *(coming once the model trains)*.
+Continue to [03 — Training the model](03-training.md).

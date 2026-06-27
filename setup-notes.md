@@ -879,4 +879,44 @@ ssh spark "python3 /home/chaotic-curiosity/regolith/render/render_predictions.py
   --out /home/chaotic-curiosity/regolith_render --fps 24"
 ```
 
+---
 
+## Session 9 — 2026-06-27 — public-release polish (Task 6)
+
+### Goal
+
+Final content polish before flipping the repo public. No new experiments; no new renders. Write the missing chapter, update all stale content, fix all placeholder links. Commit and push.
+
+### Completed
+
+**Chapter 05 (`docs/reports/05-the-render.md`) — written.** ~1,900 words in house voice covering:
+- In-distribution framing: why the scene was chosen inside `train_dr.yaml` ranges, and why that makes the overlay fair vs. chapter 04's harder real-image test
+- `--display-gain 0.78` on composite only — model sees original pixels; predictions are real
+- RTX pipeline: `RayTracedLighting`, 48 subframes, 1920×1080, ~2.4 s/frame warm, ~10.4 min total
+- The `BasicWriter` black-frame root cause and fix (`LdrColor` annotator + skip-save until mean > threshold + sustained-motion warmup) — documented as a teaching moment
+- Three-stage pipeline: Stage A (Isaac render → raw PNGs), Stage B (PyTorch overlay + branding), Stage C (host ffmpeg → MP4 + stills + GIF)
+- Reproduce commands (copy-pasteable `ssh spark "docker exec …"` blocks for all three stages)
+- "## What you now understand" summary
+- "## What you've built" series wrap-up table (00–05) with honest bottom line
+
+**README.md — updated:**
+- New `## Results` section with the real ablation numbers (no-DR 0.689, DR 750 0.788 +0.099, DR-1500 0.815), `ablation-rockiou.png`, one real-photo overlay (`real-03-apollo14-large-boulder.png`), `render-preview.gif`, and honest sim-to-real summary
+- `## Status` section rewritten: all six chapters marked done with one-line descriptions; "not started" entries removed
+
+**`docs/reports/README.md` — updated:** Status column removed; chapter descriptions rewritten to match what was actually built; 2,550-frame total corrected (was "10 k").
+
+**`docs/index.md` — updated:** Results summary + GIF added above the series table; series table descriptions updated; sister-repo links present.
+
+**Placeholder links fixed (all three):**
+- `02-domain-randomization.md`: "coming once the model trains" → live link
+- `03-training.md`: "coming next" → live link
+- `04-sim-to-real.md`: "coming next" → live link
+
+### Links verified
+
+All internal chapter links (`00-primer.md` → `01-the-lunar-stage.md` → … → `05-the-render.md`) exist and resolve as files on disk. Sister-repo GitHub URLs match the established `chaoticcuriosity-io/` org pattern. GitHub Pages URL `https://chaoticcuriosity-io.github.io/regolith/` cannot be verified locally (Pages not yet active), but `docs/index.md` is correctly placed and formatted for Jekyll/GitHub Pages.
+
+### Commit
+
+`docs/` (all chapters + assets) + `README.md` + `setup-notes.md`
+Message: `docs(task6): chapter 05 (the render) + README results section + finalize TOC/links for publish`

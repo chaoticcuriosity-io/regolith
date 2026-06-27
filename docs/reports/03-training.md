@@ -196,4 +196,4 @@ Each run writes `best.pt`, `metrics.jsonl` (per-epoch curves), and `summary.json
 - The overlays confirm the character of the win — DR recovers bright boulders the no-DR model mislabels as sky and fills rocks it drops — across 267 of 300 frames.
 - **This is still a synthetic unseen-domain test.** The real sim-to-real gap, measured against actual lunar imagery, is chapter 04.
 
-Continue to [04 — Sim-to-real](04-sim-to-real.md) *(coming next)*.
+Continue to [04 — Sim-to-real](04-sim-to-real.md).

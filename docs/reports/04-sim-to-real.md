@@ -124,4 +124,4 @@ ssh spark "docker exec regolith-train bash -lc \
 - **DR vs no-DR on real images:** no honest numeric claim is possible without labels, but DR consistently predicts less false rock and largely removes the shadow-as-sky hallucination that no-DR commits — the *same* improvement DR bought on synthetic data, now visible on real pixels. DR is **better, not fixed**.
 - The gap is a legitimate, expected result — not a failure to hide. Closing it for real flight would require real labeled lunar imagery in the loop.
 
-Continue to [05 — The render](05-the-render.md) *(coming next)*.
+Continue to [05 — The render](05-the-render.md).
