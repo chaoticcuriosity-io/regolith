@@ -35,7 +35,138 @@ See docs/reports/01-the-lunar-stage.md for the full walkthrough.
 
 from __future__ import annotations
 
+import math
+
+# Canonical training class map (matches training/metrics.py, training/dataset.py,
+# replicator/generate_dataset.py). rock (1) is the hazard class of interest.
 CLASS_MAP = {"regolith": 0, "rock": 1, "sky": 2}
+IGNORE_INDEX = 255  # unlabeled / background pixels in canonical masks
+
+# Dedicated XOR for the scene-count RNG (n_rocks / crater count) so sweeping one
+# domain-randomization knob doesn't shift the others' draw order (see build_lunar_stage).
+_COUNT_RNG_XOR = 0xA11CE
+
+# --------------------------------------------------------------------------- #
+# Structural constants (the scene's fixed skeleton — NOT domain-randomized).
+# --------------------------------------------------------------------------- #
+TERRAIN_SIZE_M = 920.0        # meters across (centered on origin); edge past the horizon
+TERRAIN_RES = 300             # cells per side -> (res+1)^2 vertices (~3 m cells)
+TERRAIN_BASE_FREQ_LOW = 0.010   # primary fBm undulation frequency
+TERRAIN_BASE_FREQ_HIGH = 0.045  # finer ripple frequency
+TERRAIN_RIPPLE_AMP = 0.7        # amplitude of the finer ripple layer (relative to base)
+
+SUN_COLOR = (1.0, 0.97, 0.92)   # warm white; no atmosphere to tint it
+SUN_ANGLE_DEG = 0.53            # sun's angular size -> crisp, hard shadows
+SUN_HEIGHT_M = 200.0            # light prim Z (cosmetic; DistantLight is at infinity)
+
+REGOLITH_TINT = (0.22, 0.205, 0.19)   # warm-gray diffuse at the nominal albedo
+ROCK_DIFFUSE = (0.155, 0.145, 0.135)  # darker than regolith
+ROCK_ROUGHNESS = 0.90
+ICOSPHERE_SUBDIV = 2          # rock base mesh: 162 verts / 320 faces
+
+DOME_HOLE_DEG = 34.0          # spherical-cap cut around the sun (lets the sun in)
+STAR_INSET_M = 18.0           # stars sit this far inside the dome
+CAMERA_EYE_Y = -90.0          # camera Y position (looks across +Y toward the horizon)
+CAMERA_APERTURE = 24.0        # horizontal == vertical aperture (square sensor)
+CAMERA_VIEW_DIST = 160.0      # nominal forward throw used to derive the default pitch
+
+# Default camera FOV (deg) equivalent to the validated focal=20 / aperture=24 lens,
+# and default pitch reproducing the validated eye=(0,-90,2.0) -> target=(0,70,-0.5) look.
+_DEFAULT_CAMERA_FOV_DEG = math.degrees(2.0 * math.atan(CAMERA_APERTURE / (2.0 * 20.0)))
+_DEFAULT_CAMERA_PITCH_DEG = math.degrees(math.atan2(-2.5, CAMERA_VIEW_DIST))
+
+
+# --------------------------------------------------------------------------- #
+# Domain-randomizable parameters. build_lunar_stage(seed, params) reads every
+# value below from `params`, falling back to these defaults (which reproduce the
+# validated Session-3 scene). replicator/randomizers.py samples a dict with these
+# keys per frame; the structural skeleton above stays fixed.
+# --------------------------------------------------------------------------- #
+DEFAULT_PARAMS = {
+    # Sun
+    "sun_elevation_deg": 17.0,
+    "sun_azimuth_deg": 120.0,
+    "sun_intensity": 14000.0,
+    # Regolith material
+    "regolith_albedo": 0.205,          # scalar gray; mean of REGOLITH_TINT -> exact default
+    "regolith_roughness": 0.96,
+    # Terrain
+    "terrain_amplitude": 3.2,          # primary fBm displacement amplitude (meters)
+    "crater_count_range": (6, 11),     # [lo, hi); actual count drawn from the count RNG
+    # Rocks
+    "rock_count_range": (75, 115),     # [lo, hi); actual count drawn from the count RNG
+    "near_rock_count": 12,             # guaranteed near-field boulders (sane coverage)
+    "rock_scale_range": (0.3, 1.3),    # far-field base scale (meters)
+    "near_rock_scale_range": (1.2, 3.0),  # near-field base scale (meters)
+    "near_rock_y_range": (-78.0, -48.0),  # near-rock placement band ahead of the camera
+    "embedding_depth_frac": 0.30,      # fraction of a rock's Z half-extent sunk into ground
+    # Camera
+    "camera_height_m": 2.0,            # rover/lander eye height
+    "camera_pitch_deg": _DEFAULT_CAMERA_PITCH_DEG,  # downward tilt (negative = look down)
+    "camera_fov_deg": _DEFAULT_CAMERA_FOV_DEG,      # horizontal field of view
+    # Sky dome / stars
+    "dome_radius": 600.0,
+    "star_count": 220,
+}
+
+
+def canonical_mask_from_json(raw_id_array, labels_json_path):
+    """Map a raw Replicator semantic-id mask -> the canonical class map
+    {regolith:0, rock:1, sky:2}, with unlabeled/background -> 255 (ignore index).
+
+    The raw-id -> canonical-id mapping is derived from the labels JSON class
+    NAMES (normalized ``.strip().lower()``) — never from hardcoded raw integers.
+    Replicator assigns the raw ids dynamically (it reserves 0=BACKGROUND,
+    1=UNLABELLED and numbers the scene's classes in registration order), so the
+    only stable key is the class name string.
+
+    Parameters
+    ----------
+    raw_id_array : np.ndarray
+        Single-channel (or RGB, first channel taken) raw label-id image as written
+        by ``BasicWriter(..., colorize_semantic_segmentation=False)``.
+    labels_json_path : str
+        Path to the ``semantic_segmentation_labels_*.json`` Replicator emitted
+        alongside the mask (id -> {"class": name}).
+
+    Returns
+    -------
+    np.ndarray
+        ``uint8`` array, same H×W as the input, valued in {0, 1, 2, 255}.
+
+    Raises
+    ------
+    RuntimeError
+        If the labels JSON is missing or empty (without it the raw ids are
+        unmappable, so a silent all-255 mask would be a data-corruption trap).
+    """
+    import os
+    import json
+    import numpy as np
+
+    if not labels_json_path or not os.path.isfile(labels_json_path):
+        raise RuntimeError("labels JSON missing: %r" % (labels_json_path,))
+    with open(labels_json_path) as fh:
+        raw = json.load(fh)
+    if not raw:
+        raise RuntimeError("labels JSON empty: %r" % (labels_json_path,))
+
+    arr = np.asarray(raw_id_array)
+    if arr.ndim == 3:
+        arr = arr[..., 0]
+    arr = arr.astype(np.int64)
+
+    canon = np.full(arr.shape, IGNORE_INDEX, dtype=np.uint8)
+    for k, v in raw.items():
+        try:
+            idv = int(k)
+        except (ValueError, TypeError):
+            continue
+        name = v.get("class") if isinstance(v, dict) else v
+        key = str(name).strip().lower()
+        if key in CLASS_MAP:
+            canon[arr == idv] = CLASS_MAP[key]
+    return canon
 
 
 # --------------------------------------------------------------------------- #
@@ -367,13 +498,19 @@ def _set_transform(prim, matrix):
 # --------------------------------------------------------------------------- #
 # Scene authoring.
 # --------------------------------------------------------------------------- #
-def build_lunar_stage(seed: int) -> None:
+def build_lunar_stage(seed: int, params: dict | None = None) -> None:
     """Author the lunar scene into the current Replicator / USD context.
 
     Parameters
     ----------
     seed : int
         Random seed for deterministic terrain displacement + rock scatter.
+    params : dict | None
+        Domain-randomization overrides. Any key from ``DEFAULT_PARAMS`` (sun
+        elevation/azimuth/intensity, regolith albedo/roughness, terrain amplitude,
+        rock/crater counts + scales, near-rock band, embedding depth, camera
+        height/pitch/FOV, dome radius, star count) replaces its default. When
+        ``params is None`` the scene reproduces the validated Session-3 nominal.
 
     Side effects
     ------------
@@ -382,12 +519,18 @@ def build_lunar_stage(seed: int) -> None:
     tagged with USD Semantics classes (regolith / rock / sky) so Replicator can
     emit pixel-perfect masks. Returns None.
     """
-    import math
     import numpy as np
     from pxr import Usd, UsdGeom, UsdLux, Gf, Sdf
     import omni.usd
 
+    p = dict(DEFAULT_PARAMS)
+    if params:
+        p.update(params)
+
     rng = np.random.RandomState(int(seed) & 0x7FFFFFFF)
+    # Dedicated stream for scene-element COUNTS only, so changing any other DR knob
+    # (which consumes a variable number of `rng` draws) doesn't shift n_rocks/craters.
+    count_rng = np.random.RandomState((int(seed) ^ _COUNT_RNG_XOR) & 0x7FFFFFFF)
 
     stage = omni.usd.get_context().get_stage()
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
@@ -395,16 +538,23 @@ def build_lunar_stage(seed: int) -> None:
 
     world = UsdGeom.Xform.Define(stage, "/World")
     stage.SetDefaultPrim(world.GetPrim())
-    looks = UsdGeom.Scope.Define(stage, "/World/Looks")  # noqa: F841
+    # Side-effecting prim definition: authoring /World/Looks as a Scope so the
+    # material prims below have a parent. Binding is the side effect; the handle
+    # itself is intentionally unused.
+    looks = UsdGeom.Scope.Define(stage, "/World/Looks")  # noqa: F841  (prim side-effect)
 
     # --- Materials ---------------------------------------------------------- #
+    # Regolith albedo is a single gray scalar; scale the warm tint so the default
+    # albedo (mean of REGOLITH_TINT) reproduces the validated diffuse exactly.
+    tint = np.asarray(REGOLITH_TINT, dtype=np.float64)
+    regolith_diffuse = tuple((float(p["regolith_albedo"]) / float(tint.mean())) * tint)
     regolith_mat = _make_preview_material(
         stage, "/World/Looks/RegolithMat",
-        diffuse=(0.22, 0.205, 0.19), roughness=0.96, metallic=0.0,
+        diffuse=regolith_diffuse, roughness=float(p["regolith_roughness"]), metallic=0.0,
     )
     rock_mat = _make_preview_material(
         stage, "/World/Looks/RockMat",
-        diffuse=(0.155, 0.145, 0.135), roughness=0.90, metallic=0.0,
+        diffuse=ROCK_DIFFUSE, roughness=ROCK_ROUGHNESS, metallic=0.0,
     )
     sky_mat = _make_preview_material(
         stage, "/World/Looks/SkyMat",
@@ -418,18 +568,24 @@ def build_lunar_stage(seed: int) -> None:
     )
 
     # --- Regolith ground (displaced heightfield) ---------------------------- #
-    size = 920.0          # meters across (centered on origin) — edge sits past the horizon
-    res = 300             # cells per side -> (res+1)^2 vertices (~3 m cells)
+    size = TERRAIN_SIZE_M
+    res = TERRAIN_RES
     xs = np.linspace(-size / 2.0, size / 2.0, res + 1)
     ys = np.linspace(-size / 2.0, size / 2.0, res + 1)
     X, Y = np.meshgrid(xs, ys, indexing="xy")  # shape (ny, nx) = (Y, X)
 
-    # Layered undulation + finer ripples.
-    Z = _fractal_noise_2d(X, Y, seed, octaves=5, base_freq=0.010) * 3.2
-    Z += _fractal_noise_2d(X, Y, seed + 7, octaves=4, base_freq=0.045) * 0.7
+    # Layered undulation + finer ripples (primary amplitude is domain-randomized).
+    terr_amp = float(p["terrain_amplitude"])
+    Z = _fractal_noise_2d(X, Y, seed, octaves=5, base_freq=TERRAIN_BASE_FREQ_LOW) * terr_amp
+    Z += (
+        _fractal_noise_2d(X, Y, seed + 7, octaves=4, base_freq=TERRAIN_BASE_FREQ_HIGH)
+        * (terr_amp / 3.2 * TERRAIN_RIPPLE_AMP)
+    )
 
-    # A handful of craters (parabolic bowl + raised rim).
-    n_craters = rng.randint(6, 11)
+    # A handful of craters (parabolic bowl + raised rim). Count from the dedicated
+    # count RNG (range is the DR knob); per-crater params stay on the main rng.
+    cmin, cmax = p["crater_count_range"]
+    n_craters = int(count_rng.randint(int(cmin), int(cmax)))
     for _ in range(n_craters):
         cx = rng.uniform(-size / 2.4, size / 2.4)
         cy = rng.uniform(-size / 2.4, size / 2.4)
@@ -476,19 +632,24 @@ def build_lunar_stage(seed: int) -> None:
 
     # Camera sits near (0, -90); rocks are scattered ahead (toward +Y) with a
     # few deliberately large near-field boulders to guarantee sane coverage.
-    n_rocks = int(rng.randint(75, 115))
-    n_near = 12
+    rmin, rmax = p["rock_count_range"]
+    n_rocks = int(count_rng.randint(int(rmin), int(rmax)))
+    n_near = int(p["near_rock_count"])
+    near_y_lo, near_y_hi = p["near_rock_y_range"]
+    near_s_lo, near_s_hi = p["near_rock_scale_range"]
+    far_s_lo, far_s_hi = p["rock_scale_range"]
+    embed_frac = float(p["embedding_depth_frac"])
     for i in range(n_rocks):
         r_rng = np.random.RandomState((int(seed) * 100003 + i * 9176 + 1) & 0x7FFFFFFF)
 
         if i < n_near:
             px = r_rng.uniform(-55.0, 55.0)
-            py = r_rng.uniform(-78.0, -48.0)        # 12-42 m in front of the camera
-            base_scale = r_rng.uniform(1.2, 3.0)
+            py = r_rng.uniform(float(near_y_lo), float(near_y_hi))  # ahead of the camera
+            base_scale = r_rng.uniform(float(near_s_lo), float(near_s_hi))
         else:
             px = r_rng.uniform(-95.0, 95.0)
             py = r_rng.uniform(-78.0, 230.0)
-            base_scale = r_rng.uniform(0.3, 1.3)
+            base_scale = r_rng.uniform(float(far_s_lo), float(far_s_hi))
             if r_rng.rand() < 0.15:
                 base_scale *= r_rng.uniform(2.0, 3.3)  # occasional boulder
 
@@ -507,7 +668,7 @@ def build_lunar_stage(seed: int) -> None:
         ry = r_rng.uniform(0, 360)
         rz = r_rng.uniform(0, 360)
         ground = _sample_height(Z, xs, ys, px, py)
-        cz = ground + sz * 0.30  # partially embedded in the regolith
+        cz = ground + sz * embed_frac  # partially embedded in the regolith
 
         m_scale = Gf.Matrix4d().SetScale(Gf.Vec3d(sx, sy, sz))
         rot = (
@@ -522,8 +683,8 @@ def build_lunar_stage(seed: int) -> None:
         _add_semantics(prim, "rock")
 
     # --- Sun (harsh distant light at low elevation) ------------------------- #
-    elevation_deg = 17.0   # low sun -> long, dramatic shadows; no atmosphere
-    azimuth_deg = 120.0
+    elevation_deg = float(p["sun_elevation_deg"])  # low sun -> long shadows; no atmosphere
+    azimuth_deg = float(p["sun_azimuth_deg"])
     el = math.radians(elevation_deg)
     az = math.radians(azimuth_deg)
     # Direction from scene toward the sun, then the emission (travel) direction.
@@ -531,18 +692,18 @@ def build_lunar_stage(seed: int) -> None:
     emit_dir = -s
 
     sun = UsdLux.DistantLight.Define(stage, "/World/Sun")
-    sun.CreateIntensityAttr(14000.0)
-    sun.CreateColorAttr(Gf.Vec3f(1.0, 0.97, 0.92))
-    sun.CreateAngleAttr(0.53)  # sun's angular size -> crisp, hard shadows
-    _set_transform(sun.GetPrim(), _basis_matrix(emit_dir, translate=(0.0, 0.0, 200.0)))
+    sun.CreateIntensityAttr(float(p["sun_intensity"]))
+    sun.CreateColorAttr(Gf.Vec3f(*SUN_COLOR))
+    sun.CreateAngleAttr(SUN_ANGLE_DEG)  # sun's angular size -> crisp, hard shadows
+    _set_transform(sun.GetPrim(), _basis_matrix(emit_dir, translate=(0.0, 0.0, SUN_HEIGHT_M)))
 
     # --- Star dome (near-enclosing emissive sphere, open at the sun) -------- #
     # A fully closed dome would occlude the distant sun and leave the whole scene
     # in shadow. We cut a cap around the sun direction (which is behind the camera,
     # so never in frame) so sun shadow rays escape while the camera still sees sky.
-    dome_radius = 600.0
+    dome_radius = float(p["dome_radius"])
     dome_prim = _author_sky_dome(
-        stage, "/World/StarDome", dome_radius, sun_dir=s, hole_deg=34.0
+        stage, "/World/StarDome", dome_radius, sun_dir=s, hole_deg=DOME_HOLE_DEG
     )
     _bind_material(dome_prim, sky_mat)
     _add_semantics(dome_prim, "sky")
@@ -551,8 +712,8 @@ def build_lunar_stage(seed: int) -> None:
     # the camera actually sees. Tagged "sky" so they fold into the sky class.
     try:
         UsdGeom.Scope.Define(stage, "/World/Stars")
-        n_stars = 220
-        star_r = dome_radius - 18.0
+        n_stars = int(p["star_count"])
+        star_r = dome_radius - STAR_INSET_M
         for i in range(n_stars):
             d = rng.normal(size=3)
             d = d / np.linalg.norm(d)
@@ -576,19 +737,29 @@ def build_lunar_stage(seed: int) -> None:
         print(">>> star scatter skipped: %r" % exc, flush=True)
 
     # --- Camera (rover/lander eye height, looking across the terrain) ------- #
+    # FOV -> focal length for a fixed square aperture; pitch -> look direction.
+    fov_deg = float(p["camera_fov_deg"])
+    focal = CAMERA_APERTURE / (2.0 * math.tan(math.radians(fov_deg) / 2.0))
     cam = UsdGeom.Camera.Define(stage, "/World/RoverCam")
-    cam.CreateFocalLengthAttr(20.0)
-    cam.CreateHorizontalApertureAttr(24.0)
-    cam.CreateVerticalApertureAttr(24.0)
+    cam.CreateFocalLengthAttr(float(focal))
+    cam.CreateHorizontalApertureAttr(CAMERA_APERTURE)
+    cam.CreateVerticalApertureAttr(CAMERA_APERTURE)
     cam.CreateClippingRangeAttr(Gf.Vec2f(0.05, 3000.0))
-    eye = (0.0, -90.0, 2.0)            # rover eye height ~2 m
-    target = (0.0, 70.0, -0.5)         # across the terrain toward the horizon
-    fwd = (target[0] - eye[0], target[1] - eye[1], target[2] - eye[2])
+    pitch = math.radians(float(p["camera_pitch_deg"]))
+    eye = (0.0, CAMERA_EYE_Y, float(p["camera_height_m"]))
+    # Look toward +Y, tilted by pitch (negative = down). _basis_matrix normalizes.
+    fwd = (0.0, math.cos(pitch), math.sin(pitch))
     _set_transform(cam.GetPrim(), _basis_matrix(fwd, translate=eye))
 
     print(
-        ">>> build_lunar_stage: seed=%d  regolith=%dx%d grid  rocks=%d  craters=%d"
-        % (seed, res, res, n_rocks, n_craters),
+        ">>> build_lunar_stage: seed=%d  rocks=%d  craters=%d  sun(el=%.1f,az=%.1f,I=%.0f)"
+        "  albedo=%.3f  terr_amp=%.2f  cam(h=%.2f,fov=%.1f)"
+        % (
+            seed, n_rocks, n_craters,
+            elevation_deg, azimuth_deg, float(p["sun_intensity"]),
+            float(p["regolith_albedo"]), terr_amp,
+            float(p["camera_height_m"]), fov_deg,
+        ),
         flush=True,
     )
 
@@ -601,19 +772,27 @@ def _verify_and_report(raw_dir):
     map, and print unique ids + per-class pixel counts. Returns rock coverage %."""
     import os
     import glob
-    import json
     import numpy as np
 
     segs = sorted(
-        p for p in glob.glob(os.path.join(raw_dir, "**", "*.png"), recursive=True)
-        if "semantic_segmentation" in os.path.basename(p)
-        and "classid" not in os.path.basename(p)
+        q for q in glob.glob(os.path.join(raw_dir, "**", "*.png"), recursive=True)
+        if "semantic_segmentation" in os.path.basename(q)
+        and "classid" not in os.path.basename(q)
     )
     jsons = sorted(glob.glob(os.path.join(raw_dir, "**", "*.json"), recursive=True))
     if not segs:
         print(">>> VERIFY: no semantic_segmentation PNG found in %s" % raw_dir, flush=True)
         return None
+    # A single render product writes exactly one seg mask + one labels JSON per
+    # pass; more than one means a stale prior run leaked in (ambiguous mapping).
+    assert len(segs) == 1, "expected exactly 1 seg PNG in %s, found %d: %s" % (
+        raw_dir, len(segs), segs,
+    )
+    assert len(jsons) == 1, "expected exactly 1 labels JSON in %s, found %d: %s" % (
+        raw_dir, len(jsons), jsons,
+    )
     seg_path = segs[0]
+    json_path = jsons[0]
 
     from PIL import Image
 
@@ -622,34 +801,17 @@ def _verify_and_report(raw_dir):
         arr = arr[..., 0]
     arr = arr.astype(np.int64)
 
-    idmap = {}
-    if jsons:
-        with open(jsons[0]) as fh:
-            raw = json.load(fh)
-        for k, v in raw.items():
-            try:
-                idv = int(k)
-            except (ValueError, TypeError):
-                continue
-            name = v.get("class") if isinstance(v, dict) else v
-            idmap[idv] = str(name)
-
     raw_unique, raw_counts = np.unique(arr, return_counts=True)
     print(">>> VERIFY semantic mask: %s  shape=%s" % (seg_path, arr.shape), flush=True)
-    print(">>> RAW Replicator label-id -> class (from JSON):", flush=True)
-    for idv in sorted(idmap):
-        print("       id %s: %s" % (idv, idmap[idv]), flush=True)
     print(
         ">>> RAW mask unique ids: %s"
         % dict(zip(raw_unique.tolist(), raw_counts.tolist())),
         flush=True,
     )
 
-    canon = np.full(arr.shape, 255, dtype=np.uint8)
-    for idv, name in idmap.items():
-        key = name.strip().lower()
-        if key in CLASS_MAP:
-            canon[arr == idv] = CLASS_MAP[key]
+    # Canonical remap via the shared module helper (raw ids -> {regolith:0,
+    # rock:1, sky:2}, background/unlabeled -> 255), derived from the labels JSON.
+    canon = canonical_mask_from_json(arr, json_path)
 
     total = canon.size
     canon_unique = np.unique(canon)
@@ -795,7 +957,9 @@ def main():
         for _ in range(5):
             simulation_app.update()
         rep.orchestrator.step(delta_time=0.0, rt_subframes=args.subframes)
-        ok_b = _drain(lambda: bool(_segs(prev_dir)))
+        # Pass B reuses Pass A's now-warm shader cache, so the frame lands fast —
+        # a ~90 s budget is ample (vs the ~150 s cold-start budget for Pass A).
+        ok_b = _drain(lambda: bool(_segs(prev_dir)), budget=90.0)
         phase("passB_files" if ok_b else "passB_timeout")
         try:
             rep.orchestrator.wait_until_complete()

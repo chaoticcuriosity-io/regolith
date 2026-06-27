@@ -1,30 +1,44 @@
-# train_nodr.yaml — training split WITHOUT domain randomization (ablation baseline)
+# train_nodr.yaml — TRAINING split WITHOUT domain randomization (ablation control).
 #
-# Use this config to train a model on fixed-condition synthetic data.
-# Comparing this model vs the train_dr model in eval/eval_real.py
-# shows what domain randomization actually bought us.
+# The domain (sun, regolith albedo/roughness, terrain amplitude, camera, embedding,
+# star count) is FROZEN to a single nominal appearance. Scene *content* still varies:
+# the per-seed count/scale ranges below match train_dr.yaml exactly, so each frame has a
+# different rock count, layout, and terrain noise — only the look is fixed. Training a
+# model on this vs train_dr and comparing on test_photoreal is the domain-randomization
+# ablation: it isolates what randomizing the *appearance* actually bought.
+#
+# mode: nodr -> sample_params returns these fixed `nominal` values (no draws from rng).
 
+mode: nodr
 seed: 42
+res: 512
+rt_subframes: 3
 
-# Sun — fixed conditions, no randomization
-sun_elevation_deg: [45, 45]     # single angle (no-op range = fixed)
-sun_azimuth_deg: [135, 135]     # fixed direction
-sun_intensity: [100000, 100000] # fixed intensity
+nominal:
+  # --- Sun (FROZEN) ---
+  sun_elevation_deg: 22
+  sun_azimuth_deg: 120
+  sun_intensity: 14000
 
-# Regolith — fixed
-regolith_albedo: [0.10, 0.10]   # single value
+  # --- Regolith material (FROZEN) ---
+  regolith_albedo: 0.18
+  regolith_roughness: 0.94
 
-# Rocks — count and scale still vary (they're not domain-style variations)
-rock_count: [30, 50]
-rock_scale: [0.1, 1.0]
+  # --- Terrain (FROZEN amplitude; crater count still varies per seed) ---
+  terrain_amplitude: 3.2
+  crater_count: [5, 13]             # same content distribution as train_dr
 
-# Camera — fixed pose
-camera_fov_deg: [70, 70]
-camera_pose_delta:
-  translation_m: 0.0
-  rotation_deg: 0.0
+  # --- Rocks (same content distribution as train_dr) ---
+  rock_count: [70, 120]
+  rock_scale: [0.28, 1.35]
+  near_rock_scale: [1.1, 3.0]
+  near_rock_y: [-80, -46]
+  embedding_depth_frac: 0.30
 
-# Output
-output:
-  types: [rgb, semantic_segmentation, instance, distance_to_camera]
-  image_size: [1280, 720]
+  # --- Camera (FROZEN) ---
+  camera_height_m: 2.0
+  camera_pitch_deg: -0.9
+  camera_fov_deg: 62
+
+  # --- Sky (FROZEN) ---
+  star_count: 220

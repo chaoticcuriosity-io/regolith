@@ -1,35 +1,45 @@
-# test_photoreal.yaml — synthetic test split with photorealistic rendering settings
+# test_photoreal.yaml — held-out SYNTHETIC TEST split (the domain-gap test).
 #
-# Used to generate the held-out synthetic test set for eval/eval_synth.py.
-# Higher rendering quality than training splits (more ray bounces, higher SPP).
-# Domain randomization ON — same ranges as train_dr.yaml but different seed.
+# This is NOT drawn from the training distribution. Every domain knob below is shifted
+# into a range the training splits never saw (brighter higher sun, brighter/smoother
+# regolith, rougher terrain, a higher + wider + more downward camera) AND the rocks use
+# deliberately different parameters (fewer, larger boulders). A model that only memorized
+# the training appearance will degrade here; a domain-randomized model should hold up —
+# that contrast is the sim-to-real lesson this dataset is built to show. Rendered at
+# higher quality (more RTX subframes) so the test imagery is the cleanest of the three.
+#
+# mode: dr (still randomized — just over UNSEEN ranges). Count ranges are [lo, hi).
 
-seed: 999  # different from training seed — ensures held-out distribution
+mode: dr
+seed: 7777             # disjoint from the training seed -> independent draws
+res: 512
+rt_subframes: 12       # photoreal quality for the evaluation set
 
-# Sun — same ranges as train_dr
-sun_elevation_deg: [5, 85]
-sun_azimuth_deg: [0, 360]
-sun_intensity: [50000, 150000]
+ranges:
+  # --- Sun (UNSEEN: train was 5-40 deg / 9k-20k) ---
+  sun_elevation_deg: [42, 70]       # higher sun than any training frame
+  sun_azimuth_deg: [100, 260]       # rear/side hemisphere (keeps sun-hole out of frame)
+  sun_intensity: [20000, 32000]     # brighter than any training frame
 
-# Regolith
-regolith_albedo: [0.05, 0.20]
+  # --- Regolith material (UNSEEN: train was 0.10-0.28 albedo / 0.85-0.99 rough) ---
+  regolith_albedo: [0.28, 0.42]     # brighter highland regolith
+  regolith_roughness: [0.70, 0.85]  # smoother than training
 
-# Rocks
-rock_count: [10, 80]
-rock_scale: [0.05, 1.5]
+  # --- Terrain (UNSEEN: train was 2.0-4.8) ---
+  terrain_amplitude: [4.8, 7.0]     # rougher relief
+  crater_count: [10, 20]
 
-# Camera
-camera_fov_deg: [55, 85]
-camera_pose_delta:
-  translation_m: 0.1
-  rotation_deg: 5.0
+  # --- Rocks (DIFFERENT params: fewer, larger) ---
+  rock_count: [40, 90]
+  rock_scale: [0.5, 2.2]            # larger far-field rocks
+  near_rock_scale: [1.8, 4.0]       # larger near-field boulders
+  near_rock_y: [-85, -50]
+  embedding_depth_frac: [0.30, 0.55]
 
-# Rendering — higher quality for test set
-render:
-  samples_per_pixel: 128    # vs 32 for training (faster) — TODO: tune in Task 2
-  max_bounces: 8
+  # --- Camera (UNSEEN: train was h 1.5-2.7 / pitch -5..1.5 / fov 52-72) ---
+  camera_height_m: [2.5, 3.6]
+  camera_pitch_deg: [-9.0, -3.0]    # steeper down-look
+  camera_fov_deg: [70, 85]          # wider lens
 
-# Output
-output:
-  types: [rgb, semantic_segmentation, instance, distance_to_camera]
-  image_size: [1280, 720]
+  # --- Sky ---
+  star_count: [120, 260]

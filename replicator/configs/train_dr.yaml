@@ -1,36 +1,46 @@
-# train_dr.yaml — training split with domain randomization (the main training config)
+# train_dr.yaml — TRAINING split WITH domain randomization (the main training config).
 #
-# Use this config for generate_dataset.py to produce the training dataset.
-# Domain randomization is wide: covers the full plausible range of
-# lunar lighting, texture, and geometry variation.
+# Wide randomization across lunar lighting, surface, geometry, and camera so a model
+# trained here sees a broad slice of plausible appearances. Consumed by
+# replicator/generate_dataset.py via replicator/randomizers.sample_params(rng, cfg):
+# each frame draws a fresh value for every scalar knob and hands the *_count / *_scale
+# ranges through to scene.build_lunar_stage (which varies them per-element/per-seed).
+#
+# Count ranges use numpy randint semantics: [lo, hi) — the upper bound is exclusive.
 
+mode: dr
 seed: 42
+res: 512
+rt_subframes: 3        # speed over polish for the training bulk
 
-# Sun
-sun_elevation_deg: [5, 85]      # grazing to overhead
-sun_azimuth_deg: [0, 360]       # all directions
-sun_intensity: [50000, 150000]  # nits
+ranges:
+  # --- Sun (domain) ---
+  sun_elevation_deg: [5, 40]        # grazing to mid; long hard shadows
+  sun_azimuth_deg: [100, 260]       # rear/side hemisphere (camera looks +Y / az~0);
+                                    # keeps the sky-dome's sun-hole out of frame so
+                                    # the camera never sees through to the void.
+                                    # (back/side-lit shadows reach into the scene.)
+  sun_intensity: [9000, 20000]
 
-# Regolith
-regolith_albedo: [0.05, 0.20]   # dark basaltic to bright highland
-# regolith_texture_paths:       # TODO (Task 1): fill with asset paths on Spark
-#   - /workspace/assets/textures/regolith_01.png
-#   - /workspace/assets/textures/regolith_02.png
+  # --- Regolith material (domain) ---
+  regolith_albedo: [0.10, 0.28]     # dark basaltic to medium-bright highland
+  regolith_roughness: [0.85, 0.99]
 
-# Rocks
-rock_count: [10, 80]            # per frame
-rock_scale: [0.05, 1.5]        # meters (normalized; actual scale set in scene)
-# rock_mesh_paths:              # TODO (Task 1): fill with USD rock asset paths
-#   - /workspace/assets/rocks/rock_a.usd
-#   - /workspace/assets/rocks/rock_b.usd
+  # --- Terrain (domain/geometry) ---
+  terrain_amplitude: [2.0, 4.8]     # primary fBm displacement (m)
+  crater_count: [5, 13]             # -> 5..12 craters per frame
 
-# Camera
-camera_fov_deg: [55, 85]
-camera_pose_delta:              # small random offset from /World/RoverCam base pose
-  translation_m: 0.1
-  rotation_deg: 5.0
+  # --- Rocks (geometry) ---
+  rock_count: [70, 120]             # -> 70..119 rocks per frame
+  rock_scale: [0.28, 1.35]          # far-field base scale (m)
+  near_rock_scale: [1.1, 3.0]       # near-field boulder base scale (m)
+  near_rock_y: [-80, -46]           # near-rock placement band ahead of camera (m)
+  embedding_depth_frac: [0.22, 0.42]
 
-# Output
-output:
-  types: [rgb, semantic_segmentation, instance, distance_to_camera]
-  image_size: [1280, 720]
+  # --- Camera (domain) ---
+  camera_height_m: [1.5, 2.7]
+  camera_pitch_deg: [-5.0, 1.5]     # negative = look down
+  camera_fov_deg: [52, 72]
+
+  # --- Sky ---
+  star_count: [160, 300]
