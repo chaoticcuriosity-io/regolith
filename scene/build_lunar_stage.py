@@ -60,9 +60,30 @@ SUN_ANGLE_DEG = 0.53            # sun's angular size -> crisp, hard shadows
 SUN_HEIGHT_M = 200.0            # light prim Z (cosmetic; DistantLight is at infinity)
 
 REGOLITH_TINT = (0.22, 0.205, 0.19)   # warm-gray diffuse at the nominal albedo
-ROCK_DIFFUSE = (0.155, 0.145, 0.135)  # darker than regolith
-ROCK_ROUGHNESS = 0.90
-ICOSPHERE_SUBDIV = 2          # rock base mesh: 162 verts / 320 faces
+ROCK_DIFFUSE = (0.110, 0.103, 0.094)  # dark basalt; pool mean (darker than regolith)
+ROCK_ROUGHNESS = 0.93
+ICOSPHERE_SUBDIV = 2          # legacy far-field base mesh: 162 verts / 320 faces
+
+# --- Realistic rock look (geometry + PBR), used by build_lunar_stage ---------- #
+# Rocks are higher-subdivision icospheres deformed by multi-octave 3-D noise
+# (coarse fBm lumps + a ridged "facet" term + medium bumps + fine grain), shaded
+# with smooth per-vertex normals so they read as irregular, eroded, matte basalt
+# boulders — not the old smooth low-poly faceted blobs. Subdivision scales with
+# on-screen size (big near boulders get more polys) to kill faceting without
+# exploding the poly budget. The harsh raking sun + the micro-relief carry the
+# within-rock surface texture; a small dark-basalt PBR material POOL gives the
+# field subtle per-rock albedo/roughness variation (so it isn't one flat plastic).
+# NOTE: within-rock albedo via a displayColor primvar + UsdPrimvarReader was tried
+# and does NOT render on this Isaac 6.0 / Hydra build (rocks fell back to a flat
+# color), so the texture is carried by GEOMETRY, which renders reliably.
+ROCK_ALBEDO_RANGE = (0.058, 0.130)    # per-rock grayscale base albedo (dark-to-medium basalt)
+ROCK_ROUGHNESS_RANGE = (0.85, 0.97)   # per-rock roughness (uniformly matte/dusty)
+ROCK_MAT_POOL_SIZE = 12               # distinct basalt materials shared across the rock field
+ROCK_DISP_AMP = 0.34                  # nominal radial displacement amplitude (~rock irregularity)
+ROCK_SUBDIV_HERO = 5                  # big hero boulders: 10242 verts / 20480 faces (fine pits)
+ROCK_SUBDIV_NEAR = 4                  # near boulders: 2562 verts / 5120 faces
+ROCK_SUBDIV_MID = 3                   # mid rocks: 642 verts / 1280 faces
+ROCK_SUBDIV_FAR = 2                   # far specks: 162 verts / 320 faces
 
 DOME_HOLE_DEG = 34.0          # spherical-cap cut around the sun (lets the sun in)
 STAR_INSET_M = 18.0           # stars sit this far inside the dome
@@ -100,6 +121,10 @@ DEFAULT_PARAMS = {
     "near_rock_scale_range": (1.2, 3.0),  # near-field base scale (meters)
     "near_rock_y_range": (-78.0, -48.0),  # near-rock placement band ahead of the camera
     "embedding_depth_frac": 0.30,      # fraction of a rock's Z half-extent sunk into ground
+    # Rock appearance (realistic basalt look; all domain-randomizable)
+    "rock_albedo_range": ROCK_ALBEDO_RANGE,        # per-rock grayscale base albedo
+    "rock_roughness_range": ROCK_ROUGHNESS_RANGE,  # per-rock roughness
+    "rock_displacement_amp": ROCK_DISP_AMP,        # radial noise-displacement amplitude
     # Camera
     "camera_height_m": 2.0,            # rover/lander eye height
     "camera_pitch_deg": _DEFAULT_CAMERA_PITCH_DEG,  # downward tilt (negative = look down)
@@ -266,7 +291,11 @@ def _icosphere(subdiv):
 
 
 def _rock_radius_multiplier(dirs, rng, amp=0.55, nlobes=6):
-    """Per-vertex radial deformation for a unit sphere -> radius multipliers (N,)."""
+    """Per-vertex radial deformation for a unit sphere -> radius multipliers (N,).
+
+    Legacy smooth-lobe deformer (the old low-poly "blob" look). Kept for reference
+    / backward-compat; the realistic rocks use ``_displace_rock`` (3-D fBm) instead.
+    """
     import numpy as np
 
     disp = np.zeros(len(dirs), dtype=np.float64)
@@ -279,6 +308,172 @@ def _rock_radius_multiplier(dirs, rng, amp=0.55, nlobes=6):
         disp += a * np.sin(freq * (dirs @ axis) + phase)
     disp /= nlobes
     return 1.0 + amp * disp
+
+
+# --------------------------------------------------------------------------- #
+# 3-D value noise (for rock surface displacement). Mirrors the 2-D terrain
+# noise above but samples a 3-D lattice so it can be evaluated on the unit
+# sphere's vertex directions (gives coherent, seam-free deformation).
+# --------------------------------------------------------------------------- #
+def _hash3(ix, iy, iz, seed):
+    """Deterministic per-lattice-point hash for a 3-D integer grid -> [0, 1)."""
+    import numpy as np
+
+    ix = ix.astype(np.int64)
+    iy = iy.astype(np.int64)
+    iz = iz.astype(np.int64)
+    n = (
+        (ix * np.int64(73856093))
+        ^ (iy * np.int64(19349663))
+        ^ (iz * np.int64(83492791))
+        ^ np.int64(int(seed) * 2654435761 & 0x7FFFFFFFFFFFFFFF)
+    )
+    n = (n ^ (n >> np.int64(13))) * np.int64(1274126177)
+    n = n & np.int64(0x7FFFFFFF)
+    return n.astype(np.float64) / float(0x7FFFFFFF)
+
+
+def _value_noise_3d(P, seed, freq):
+    """Trilinear value noise on a 3-D lattice -> array in [0, 1], shape (N,).
+
+    ``P`` is an (N, 3) array of sample positions; ``freq`` scales the lattice.
+    """
+    import numpy as np
+
+    pf = np.asarray(P, dtype=np.float64) * freq
+    p0 = np.floor(pf).astype(np.int64)
+    t = pf - p0
+    s = t * t * (3.0 - 2.0 * t)  # smoothstep per-axis
+    x0, y0, z0 = p0[:, 0], p0[:, 1], p0[:, 2]
+    sx, sy, sz = s[:, 0], s[:, 1], s[:, 2]
+
+    def corner(dx, dy, dz):
+        return _hash3(x0 + dx, y0 + dy, z0 + dz, seed)
+
+    c000 = corner(0, 0, 0); c100 = corner(1, 0, 0)
+    c010 = corner(0, 1, 0); c110 = corner(1, 1, 0)
+    c001 = corner(0, 0, 1); c101 = corner(1, 0, 1)
+    c011 = corner(0, 1, 1); c111 = corner(1, 1, 1)
+    x00 = c000 * (1.0 - sx) + c100 * sx
+    x10 = c010 * (1.0 - sx) + c110 * sx
+    x01 = c001 * (1.0 - sx) + c101 * sx
+    x11 = c011 * (1.0 - sx) + c111 * sx
+    y0i = x00 * (1.0 - sy) + x10 * sy
+    y1i = x01 * (1.0 - sy) + x11 * sy
+    return y0i * (1.0 - sz) + y1i * sz
+
+
+def _fbm_3d(P, seed, octaves=5, base_freq=1.0, lacunarity=2.0, gain=0.5):
+    """Fractal (fBm) 3-D value noise -> array roughly in [-1, 1], shape (N,)."""
+    import numpy as np
+
+    total = np.zeros(len(P), dtype=np.float64)
+    amp = 1.0
+    freq = base_freq
+    norm = 0.0
+    for o in range(int(octaves)):
+        total += amp * _value_noise_3d(P, seed + o * 131, freq)
+        norm += amp
+        amp *= gain
+        freq *= lacunarity
+    return (total / norm) * 2.0 - 1.0
+
+
+def _vertex_normals(points, faces):
+    """Smooth (area-weighted) per-vertex normals for a triangle mesh -> (N, 3).
+
+    Averaging face normals into the shared vertices is what kills the faceted
+    look: the high-frequency surface detail lives in the geometry, but shading
+    interpolates smoothly across it so the rock reads as eroded stone, not a
+    low-poly gem.
+    """
+    import numpy as np
+
+    pts = np.asarray(points, dtype=np.float64)
+    f = np.asarray(faces, dtype=np.int64)
+    n = np.zeros_like(pts)
+    v0, v1, v2 = pts[f[:, 0]], pts[f[:, 1]], pts[f[:, 2]]
+    fn = np.cross(v1 - v0, v2 - v0)  # area-weighted (not normalized)
+    for k in range(3):
+        np.add.at(n, f[:, k], fn)
+    ln = np.linalg.norm(n, axis=1, keepdims=True)
+    ln[ln == 0.0] = 1.0
+    return n / ln
+
+
+def _displace_rock(base_dirs, rng, amp=ROCK_DISP_AMP):
+    """Deform a unit icosphere into an irregular, eroded lunar rock.
+
+    Radial displacement = coarse fBm lumps (the overall blocky boulder form) +
+    a ridged "facet" term (angular creases / planar erosion, NOT smooth blobs) +
+    fine high-frequency grain (surface micro-detail that reads under raking sun).
+    The noise domain is sampled anisotropically per rock so elongation/angularity
+    vary rock-to-rock. Radius is clamped away from 0 to avoid pinching/spikes.
+
+    Parameters
+    ----------
+    base_dirs : (N, 3) unit-sphere vertex directions (== unit-radius points).
+    rng : np.random.RandomState  (per-rock stream -> deterministic).
+    amp : nominal displacement amplitude.
+
+    Returns
+    -------
+    (N, 3) float64 displaced points.
+    """
+    import numpy as np
+
+    dirs = np.asarray(base_dirs, dtype=np.float64)
+    # Per-rock noise domain: random offset + anisotropic stretch (elongation).
+    off = rng.uniform(-41.0, 41.0, size=3)
+    aniso = rng.uniform(0.70, 1.55, size=3)
+    P = dirs * aniso[None, :] + off[None, :]
+
+    seed_a = int(rng.randint(1, 1_000_000))
+    seed_b = int(rng.randint(1, 1_000_000))
+    bf = float(rng.uniform(1.05, 1.75))
+
+    # Coarse lumps -> overall irregular boulder silhouette (~[-1, 1]).
+    lump = _fbm_3d(P, seed_a, octaves=4, base_freq=bf * 0.85, lacunarity=2.05, gain=0.5)
+    # Ridged term -> sharp creases / angular facets (sub-angular fractured rock).
+    rid = _fbm_3d(P * 1.7, seed_b, octaves=4, base_freq=bf, lacunarity=2.2, gain=0.5)
+    rid = 1.0 - np.abs(rid)        # in [0, 1]; valleys -> sharp ridges
+    rid = rid * rid                # sharpen the creases
+    # Medium bumps + fine pits -> surface micro-relief that casts small shadows
+    # under the raking sun (this is what reads as rough STONE, not a smooth blob).
+    med = _fbm_3d(P * 3.0, seed_a + 401, octaves=3, base_freq=bf * 1.7,
+                  lacunarity=2.3, gain=0.5)
+    fine = _fbm_3d(P * 7.0, seed_b + 977, octaves=2, base_freq=bf * 2.7,
+                   lacunarity=2.5, gain=0.5)
+
+    a_lump = float(amp) * rng.uniform(0.90, 1.15)  # dominant: solid blocky form
+    a_rid = float(amp) * rng.uniform(0.26, 0.42)   # angular creases (sub-angular rock)
+    a_med = float(amp) * rng.uniform(0.12, 0.19)   # gentle surface bumps
+    a_fine = float(amp) * rng.uniform(0.05, 0.09)  # subtle grain/pits (texture, not voids)
+    radius = (
+        1.0
+        + a_lump * lump
+        + a_rid * (rid - 0.5) * 2.0
+        + a_med * med
+        + a_fine * fine
+    )
+    radius = np.clip(radius, 0.50, 1.85)
+    return dirs * radius[:, None]
+
+
+def _subdiv_for_scale(base_scale):
+    """Pick an icosphere subdivision by a rock's base scale (on-screen size).
+
+    Big/near boulders dominate the frame -> high subdivision (no faceting);
+    far specks are a few pixels -> low subdivision (poly budget). Returns an int.
+    """
+    s = float(base_scale)
+    if s >= 1.8:
+        return ROCK_SUBDIV_HERO
+    if s >= 0.9:
+        return ROCK_SUBDIV_NEAR
+    if s >= 0.45:
+        return ROCK_SUBDIV_MID
+    return ROCK_SUBDIV_FAR
 
 
 def _sample_height(Zgrid, xs, ys, px, py):
@@ -458,6 +653,36 @@ def _make_preview_material(
     return mat
 
 
+def _make_rock_material_pool(stage, base_path, rng, n, albedo_range, rough_range):
+    """Author a small pool of dark-basalt PBR materials -> list[UsdShade.Material].
+
+    Each is a UsdPreviewSurface with a low grayscale albedo (dusty mare/highland
+    basalt) carrying a faint warm-gray tint + tiny per-channel jitter, and a high
+    per-material roughness. Rocks draw from the pool so the boulder field shows
+    subtle per-rock albedo/roughness variation instead of one uniform plastic.
+    The albedo is sampled with a mild dark bias (more dark basalt than light) so
+    the field reads as mostly dark stone with the occasional dustier/lighter rock.
+    """
+    import numpy as np
+
+    mats = []
+    lo, hi = float(albedo_range[0]), float(albedo_range[1])
+    rlo, rhi = float(rough_range[0]), float(rough_range[1])
+    # Basalt leans faintly warm-gray (slightly more red, slightly less blue).
+    tint = np.array([1.035, 1.00, 0.955], dtype=np.float64)
+    for k in range(int(n)):
+        b = lo + (hi - lo) * float(rng.uniform(0.0, 1.0)) ** 1.6  # dark-biased
+        jitter = rng.uniform(-0.006, 0.006, size=3)
+        diffuse = np.clip(b * tint + jitter, 0.02, 0.55)
+        rough = float(rng.uniform(rlo, rhi))
+        mat = _make_preview_material(
+            stage, "%s/RockMat_%02d" % (base_path, k),
+            diffuse=tuple(float(c) for c in diffuse), roughness=rough, metallic=0.0,
+        )
+        mats.append(mat)
+    return mats
+
+
 def _bind_material(prim, material):
     from pxr import UsdShade
 
@@ -552,9 +777,12 @@ def build_lunar_stage(seed: int, params: dict | None = None) -> None:
         stage, "/World/Looks/RegolithMat",
         diffuse=regolith_diffuse, roughness=float(p["regolith_roughness"]), metallic=0.0,
     )
-    rock_mat = _make_preview_material(
-        stage, "/World/Looks/RockMat",
-        diffuse=ROCK_DIFFUSE, roughness=ROCK_ROUGHNESS, metallic=0.0,
+    # Dark-basalt PBR material POOL (subtle per-rock albedo/roughness variation).
+    # Its own RNG stream so it doesn't shift the terrain/rock-scatter draw order.
+    rock_mat_rng = np.random.RandomState((int(seed) * 2246822519 + 0x20C) & 0x7FFFFFFF)
+    rock_mats = _make_rock_material_pool(
+        stage, "/World/Looks", rock_mat_rng, ROCK_MAT_POOL_SIZE,
+        p["rock_albedo_range"], p["rock_roughness_range"],
     )
     sky_mat = _make_preview_material(
         stage, "/World/Looks/SkyMat",
@@ -624,11 +852,19 @@ def build_lunar_stage(seed: int, params: dict | None = None) -> None:
     _bind_material(regolith_prim, regolith_mat)
     _add_semantics(regolith_prim, "regolith")
 
-    # --- Rocks (noise-deformed icospheres) ---------------------------------- #
+    # --- Rocks (multi-octave-noise-displaced icospheres, smooth-shaded) ------ #
+    # Realistic, asset-free basalt boulders: a higher-subdivision icosphere (LOD
+    # by on-screen size) radially displaced by 3-D fBm + ridged facets + fine
+    # grain (_displace_rock), shaded with smooth per-vertex normals so the surface
+    # detail reads as eroded stone rather than a faceted gem.  Topology per LOD is
+    # built ONCE and reused; only the per-rock displacement is recomputed.
     UsdGeom.Xform.Define(stage, "/World/Rocks")
-    base_pts, base_faces = _icosphere(2)  # 162 verts / 320 faces
-    face_counts_rock = np.full(len(base_faces), 3, dtype=np.int32)
-    face_indices_rock = base_faces.ravel()
+    ico_lod = {}  # subdiv -> (base_pts, base_faces, face_counts, face_indices_flat)
+    for lvl in (ROCK_SUBDIV_FAR, ROCK_SUBDIV_MID, ROCK_SUBDIV_NEAR, ROCK_SUBDIV_HERO):
+        bp, bf = _icosphere(lvl)
+        ico_lod[lvl] = (bp, bf, np.full(len(bf), 3, dtype=np.int32), bf.ravel())
+
+    disp_amp = float(p["rock_displacement_amp"])
 
     # Camera sits near (0, -90); rocks are scattered ahead (toward +Y) with a
     # few deliberately large near-field boulders to guarantee sane coverage.
@@ -639,6 +875,7 @@ def build_lunar_stage(seed: int, params: dict | None = None) -> None:
     near_s_lo, near_s_hi = p["near_rock_scale_range"]
     far_s_lo, far_s_hi = p["rock_scale_range"]
     embed_frac = float(p["embedding_depth_frac"])
+    total_rock_faces = 0
     for i in range(n_rocks):
         r_rng = np.random.RandomState((int(seed) * 100003 + i * 9176 + 1) & 0x7FFFFFFF)
 
@@ -653,17 +890,23 @@ def build_lunar_stage(seed: int, params: dict | None = None) -> None:
             if r_rng.rand() < 0.15:
                 base_scale *= r_rng.uniform(2.0, 3.3)  # occasional boulder
 
-        mult = _rock_radius_multiplier(base_pts, r_rng)
-        rock_pts = base_pts * mult[:, None]
+        # LOD by on-screen size; displace + smooth-shade this rock.
+        subdiv = _subdiv_for_scale(base_scale)
+        base_pts, _bf, fc_rock, fi_rock = ico_lod[subdiv]
+        rock_pts = _displace_rock(base_pts, r_rng, amp=disp_amp)
+        rock_nrm = _vertex_normals(rock_pts, _bf)
+        total_rock_faces += len(_bf)
 
         prim = _author_mesh(
             stage, "/World/Rocks/Rock_%03d" % i,
-            rock_pts, face_counts_rock, face_indices_rock,
+            rock_pts, fc_rock, fi_rock, normals=rock_nrm,
         )
 
-        sx = base_scale * r_rng.uniform(0.8, 1.3)
-        sy = base_scale * r_rng.uniform(0.8, 1.3)
-        sz = base_scale * r_rng.uniform(0.5, 0.9)  # flattened boulders
+        # Per-rock anisotropic scale: vary elongation (slab-like vs blocky) and
+        # flatten on Z (partially-buried boulders sit lower than they are wide).
+        sx = base_scale * r_rng.uniform(0.78, 1.34)
+        sy = base_scale * r_rng.uniform(0.78, 1.34)
+        sz = base_scale * r_rng.uniform(0.5, 0.92)
         rx = r_rng.uniform(0, 360)
         ry = r_rng.uniform(0, 360)
         rz = r_rng.uniform(0, 360)
@@ -679,7 +922,8 @@ def build_lunar_stage(seed: int, params: dict | None = None) -> None:
         m_rot = Gf.Matrix4d().SetRotate(rot)
         m_trans = Gf.Matrix4d().SetTranslate(Gf.Vec3d(px, py, cz))
         _set_transform(prim, m_scale * m_rot * m_trans)
-        _bind_material(prim, rock_mat)
+        # Draw a basalt material from the pool (deterministic per rock).
+        _bind_material(prim, rock_mats[r_rng.randint(len(rock_mats))])
         _add_semantics(prim, "rock")
 
     # --- Sun (harsh distant light at low elevation) ------------------------- #
@@ -752,10 +996,10 @@ def build_lunar_stage(seed: int, params: dict | None = None) -> None:
     _set_transform(cam.GetPrim(), _basis_matrix(fwd, translate=eye))
 
     print(
-        ">>> build_lunar_stage: seed=%d  rocks=%d  craters=%d  sun(el=%.1f,az=%.1f,I=%.0f)"
-        "  albedo=%.3f  terr_amp=%.2f  cam(h=%.2f,fov=%.1f)"
+        ">>> build_lunar_stage: seed=%d  rocks=%d (%d tris)  craters=%d"
+        "  sun(el=%.1f,az=%.1f,I=%.0f)  albedo=%.3f  terr_amp=%.2f  cam(h=%.2f,fov=%.1f)"
         % (
-            seed, n_rocks, n_craters,
+            seed, n_rocks, total_rock_faces, n_craters,
             elevation_deg, azimuth_deg, float(p["sun_intensity"]),
             float(p["regolith_albedo"]), terr_amp,
             float(p["camera_height_m"]), fov_deg,
