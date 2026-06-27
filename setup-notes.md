@@ -433,3 +433,124 @@ ssh spark "docker exec -d isaac-dev bash -lc '
 # 3. Check progress (one-liner)
 ssh spark "cat /home/chaotic-curiosity/regolith_data/{train_dr,train_nodr,test_photoreal}/progress.txt 2>/dev/null; tail -3 /home/chaotic-curiosity/regolith_data/gen.log"
 ```
+
+---
+
+## Session 5 — 2026-06-27 — RTX resource-descriptor leak: the detached full-gen stall + the fix
+
+### What happened
+
+The Session-4 detached full generation chained all three splits **sequentially inside ONE
+long-lived `isaac-dev` container** (`docker exec -d`, three `generate_dataset.py` calls).
+`train_dr` completed **1500/1500**. The next process, `train_nodr` (a fresh PID in the same
+container), died at **frame 136** with:
+
+```
+[Warning] [carb] Plugin interface for a client: omni.hydratexture.plugin was already released.
+[Warning] [omni.graph.core.plugin] …Replicator_semantic_segmentation… Illegal cycle connection
+    from …Replicator_semantic_segmentation.outputs:exec to …WriterSyncGate.inputs:execIn ignored
+[Fatal] [omni.rtx] Out of resource descriptors!
+```
+
+…then hung (PID spinning ~663 % CPU, GPU 94 %). `test_photoreal` never started. Memory was
+never the problem (100+ GiB free throughout) — this is a **GPU resource-descriptor leak**, not RAM.
+
+### Root cause (confirmed empirically, not just hypothesised)
+
+1. **The SDG render loop leaks RTX resource descriptors per frame.** `generate_dataset.py`
+   creates a fresh `render_product` + `BasicWriter` every frame (`rep.create.render_product(...)`
+   → `writer.attach` → step → `writer.detach` → `rp.destroy()`). The hydra render target /
+   SDG OmniGraph teardown is not clean (hence the `hydratexture … already released` +
+   `Illegal cycle connection` flood). Each frame leaks ~one descriptor set. Frame time also
+   creeps up as the leak grows (measured: 1.5 s → 4.1 s over 750 frames).
+2. **`SimulationApp.close()` segfaults on shutdown without releasing GPU descriptors**
+   (Session-2 Gotcha 6). So the leak is **not reclaimed on process exit**.
+3. **The leaked pool is HOST/driver-level — it survives `docker rm -f` too.** Proven by the
+   recovery sequence below: the budget fell monotonically across back-to-back runs
+   **1500 → 136 → 18 → 0** (a genuinely-clean fresh container, launched immediately after
+   killing the predecessor, died on **frame 0**).
+4. **The pool reclaims only LAZILY**, after the leaking container is fully gone AND the GPU
+   sits idle (~2–3 min at 0 % util). After ~5 min idle, a fresh `n=3` probe completed cleanly
+   — the pool had recovered. A single fresh process from a **reclaimed** pool sustains
+   **≥1500** frames (train_dr proved it).
+5. **A GPU reset is impossible here.** `nvidia-smi --gpu-reset -i 0` →
+   *"GPU … is the primary GPU"* (the single GB10 drives Xorg/the desktop). `sudo` is not
+   passwordless, and a reboot would destroy the long-running co-tenants (gsplat/mjlab/unsloth).
+   **Idle reclamation is the only practical recovery.**
+
+**Why the original run failed:** all three splits shared **one** host descriptor pool with
+**zero reclaim time** between them. `train_dr`'s 1500 frames drained the shared pool;
+`train_nodr` started on the depleted remainder → exhausted it at frame 136. The Task-2 prompt's
+"fresh container (clean GPU context) per split" framing is **necessary but not sufficient** —
+a fresh *container* does NOT get a fresh *descriptor pool* (the pool is host-level). The missing
+ingredient is an **idle-reclaim gap between splits**.
+
+### The rule (durable fix)
+
+- **One fresh container per split** (fresh process), AND
+- **a GPU-idle reclaim gap between splits** (~2–3 min, GPU at 0 % util, no Isaac container up),
+  so the driver reclaims the prior split's leaked descriptors before the next split starts.
+- **Keep any single split well under the ~1500-frame clean-pool budget.** Chunk splits
+  >~1000 frames into ≤~750-frame pieces, each in a fresh container + reclaim gap, continuing
+  the frame indices and per-frame seed with `--start-index` (seeds are deterministic from
+  `base_seed ^ ((i+1)*2654435761)`, so resuming at index N continues the exact sequence with
+  no gaps/dupes). Here neither remaining split needed chunking (750 and 300 each < 1500).
+- **NEVER run all splits back-to-back in one long-lived container.** Any future full-dataset
+  regen must use `scripts/generate_all.sh` (one fresh container + reclaim gap per split).
+- **Monitoring caveat:** when a watcher tails a log that the next run truncates with `>`, a
+  `grep` for `Out of resource descriptors` can match the **previous** run's leftover line
+  before truncation (a false positive that bit us twice). Guard it: confirm the new run's
+  header line is present first.
+
+### Recovery performed (this session)
+
+1. `docker rm -f isaac-dev` — killed the hung PID 7080, freed the leaked GPU context. GPU → 0 %.
+2. Deleted the partial `train_nodr` (136 frames) — files are owned by container uid 1234, so
+   the host user can't `rm` them; deleted via a throwaway uid-1234 container
+   (`docker run --rm --entrypoint bash -v …regolith_data:/workspace/data <image> -lc 'rm -rf …'`).
+   **Left `train_dr` (1500) untouched.**
+3. Diagnosed the host-level leak (budget 1500→136→18→0); established that ~5 min idle reclaims
+   the pool (clean `n=3` probe).
+4. **`train_nodr` (750, seed 42):** fresh container, launched after a confirmed idle gap.
+   Passed frame 136 decisively and completed **750/750** (status=done, clean shutdown). This
+   proved the fix.
+5. Idle gap, then **`test_photoreal` (300, seed 7777, subframes=12):** fresh container,
+   completed **300/300** (status=done). subframes=12 was not meaningfully slower than
+   subframes=3 (DLSS upscales from ~256² regardless — Session-4 Gotcha 12).
+
+### Final verification (no fabrication)
+
+| split           | masks | rgb  | index range | contiguous | dupes | ignore | sample ids |
+|-----------------|-------|------|-------------|------------|-------|--------|------------|
+| train_dr        | 1500  | 1500 | 0..1499     | yes        | no    | 0.000  | {0,1,2}    |
+| train_nodr      | 750   | 750  | 0..749      | yes        | no    | 0.000  | {0,1,2}    |
+| test_photoreal  | 300   | 300  | 0..299      | yes        | no    | 0.000  | {0,1,2}    |
+
+Mask spot-checks (first/middle/last + random): canonical ids exactly `{0,1,2}` (rock = 1),
+**0.00000 ignore** in every sampled frame; rock is the sparse few-% class (train ~2–10 %,
+test up to ~14 % with the larger boulders — as intended). Final host state: no Isaac
+containers, GPU 0 % util (only ComfyUI 170 MiB + desktop), **110 GiB free**. Co-tenants were
+left running throughout (never stopped → nothing to restore).
+
+### Reproduce
+
+```bash
+# Durable full regen — one fresh container + reclaim gap per split:
+ssh spark "bash /home/chaotic-curiosity/regolith/scripts/generate_all.sh"
+
+# Per-split manual pattern (what this session did), e.g. train_nodr:
+ssh spark "docker rm -f isaac-dev 2>/dev/null; \
+  for i in 1 2 3 4 5 6 7; do nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader; sleep 20; done; \
+  docker run -d --name isaac-dev --entrypoint bash --gpus all --network=host \
+    -e ACCEPT_EULA=Y -e PRIVACY_CONSENT=Y \
+    -v /home/chaotic-curiosity/regolith:/workspace/regolith:rw \
+    -v /home/chaotic-curiosity/regolith_data:/workspace/data:rw \
+    -v /home/chaotic-curiosity/regolith_cache:/isaac-sim/.cache:rw \
+    nvcr.io/nvidia/isaac-sim:6.0.0 -lc 'sleep infinity'; \
+  docker exec -d isaac-dev bash -lc 'cd /workspace/regolith && \
+    /isaac-sim/python.sh replicator/generate_dataset.py \
+      --config replicator/configs/train_nodr.yaml --n 750 \
+      --out /workspace/data/train_nodr --seed 42 --res 512 >> /workspace/data/gen_nodr.log 2>&1'"
+# …then remove isaac-dev, idle-reclaim gap, repeat for test_photoreal (seed 7777). NEVER chain splits in one container.
+```
+
