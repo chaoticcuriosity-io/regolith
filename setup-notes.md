@@ -671,4 +671,79 @@ See `docs/reports/03-training.md` § Reproduce for the three `python training/tr
 (the size-matched `train_dr_750` symlink setup is the first block there). Figure regeneration is
 pure post-processing from the saved checkpoints — no retraining required.
 
+## Session 7 — 2026-06-27 — sim-to-real evaluation on real lunar photos (Task 4)
+
+### Goal
+
+Spend the credibility: take the deployed `dr_1500` checkpoint (synthetic val rock-IoU 0.815) and
+the `nodr_750` control, freeze them, and run them on **real public-domain lunar photographs** to
+see — honestly — what survives contact with real pixels. A visible domain gap is a legitimate
+result, not something to hide.
+
+### Eval code (new, committed)
+
+- `eval/_infer.py` — shared inference core: `load_model` (rebuilds `build_model(model_name)` from
+  the checkpoint's `model_name`, `load_state_dict`), ImageNet-normalized `preprocess`, `predict`
+  (SegFormer logits upsampled H/4 → input size **before** argmax, matching `train.py`), `colorize`
+  + alpha `overlay` with the canonical palette `{regolith=(170,140,110), rock=(220,45,40),
+  sky=(70,120,205)}`, and `fit_square` (letterbox/cover to 512²).
+- `eval/eval_synth.py` — formalizes the held-out synthetic eval: globally-pooled tp/fp/fn → per-class
+  IoU (same accumulation as training). **Sanity check passed:** `dr_1500` on `test_photoreal` →
+  rock-IoU **0.8147** / mIoU 0.9139 (regolith 0.9521 / rock 0.8147 / sky 0.9750), reproducing the
+  training-time 0.815 to the third decimal ⇒ the inference path is faithful.
+- `eval/eval_real.py` — CLI (checkpoint, image-dir, out) + optional `--compare-checkpoint` for the
+  money panel `[ real RGB | no-DR overlay | DR-1500 overlay ]`. No ground truth on real images ⇒
+  **qualitative only, no fabricated IoU**.
+
+Note: the HF `SegformerForSemanticSegmentation LOAD REPORT` (UNEXPECTED `classifier.*`, MISSING
+`decode_head.*`) printed at load is **benign** — it's `build_model`'s pretrained-encoder init
+*before* `load_state_dict` applies the trained weights; the exact 0.8147 match proves the trained
+weights loaded.
+
+### Real images (curation)
+
+7 frames, NASA public domain, fetched over plain HTTPS from the NASA Image & Video Library
+(`images-assets.nasa.gov`), spanning **Apollo 11/14/15/16/17** — 1 color + 6 B&W, with-sky and
+without-sky compositions. Chosen terrain-dominant; astronaut/lander/rover/flag/Earth frames
+rejected as unfair to a 3-class `{regolith,rock,sky}` model. All ~square (aspect 0.995–1.012) so
+letterboxing is negligible. Capped to ≤1024 px, committed under `eval/real_images/` with
+`sources.md` (NASA IDs + URLs + public-domain statement).
+
+**Kaggle quantitative bonus: SKIPPED — no creds.** No `~/.kaggle/kaggle.json`, no
+`KAGGLE_USERNAME`/`KAGGLE_KEY`, on host or in `regolith-train`. Per the plan, did **not** attempt
+interactive auth ⇒ no quantitative cross-domain IoU this session. `download_real.py` /
+`class_mapping.py` remain ready for a credentialed run.
+
+### Honest findings (qualitative)
+
+- **Transfers well:** the horizon / black-sky boundary (clean on every with-sky frame), and
+  detection of **large real rocks** (boulders, the Apollo 16 block, the Apollo 15 cobble field all
+  fire red).
+- **The gap, visible:** (1) **over-segmentation of rock on fine regolith** — DR labels **~52%** of
+  pixels rock on average across the 7 frames (no-DR ~61%), vs 1–8% in training; clearly false on
+  smooth-soil frames (Apollo 11 = 42% rock). (2) **Dark shadows → sky** — deep real shadows get
+  painted blue (vivid on the Apollo 16 block's cast shadow). (3) **Thin / lens-flare-hazed sky
+  missed** (Apollo 15 Hadley).
+- **DR vs no-DR on real:** no ground truth ⇒ no numeric claim, but DR consistently predicts **less
+  false rock** (6/7 frames) and **largely removes the shadow-as-sky hallucination** no-DR commits
+  (clear on Apollo 17 / Apollo 14) — the *same* improvement DR bought on synthetic, now visible on
+  real pixels. **DR is better, not fixed**; both still show the core gap.
+- Bonus: 6/7 frames are **B&W** (an unseen color regime) yet still produce coherent structure ⇒ the
+  transferred cues are shape/shadow, not palette.
+
+### Deliverables
+
+- `docs/reports/04-sim-to-real.md` — chapter 04, house voice, ~2.3k words.
+- `docs/reports/assets/real-{01..07}-*.png` — per-photo 3-panel overlays (downsized for repo
+  weight); `real-contactsheet.png` overview; `real-predictions.json` (per-class fractions);
+  `eval-synth-dr1500.json` (synthetic sanity numbers).
+
+Checkpoints stay on the Spark (git-excluded). Eval ran in `regolith-train`; outputs at
+`/workspace/regolith/outputs/eval_{synth,real}/`, pulled back via `scp`.
+
+### Reproduce
+
+See `docs/reports/04-sim-to-real.md` § Reproduce for the two `python eval/eval_{synth,real}.py`
+commands (run inside `regolith-train`).
+
 
