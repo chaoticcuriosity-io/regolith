@@ -45,6 +45,7 @@ import json
 import os
 import random
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -91,6 +92,9 @@ def parse_args() -> argparse.Namespace:
                    help="Batch size per forward/backward step (default: 8)")
     p.add_argument("--seed",        type=int,   default=0,
                    help="Global random seed for reproducibility (default: 0)")
+    p.add_argument("--patience",    type=int,   default=8,
+                   help="Early-stopping patience on val rock-IoU; epochs without "
+                        "improvement before stopping. 0 disables (default: 8)")
     return p.parse_args()
 
 
@@ -179,7 +183,9 @@ class _ConfusionAccum:
         miou     = float(np.nanmean(ious))
         rock_iou = ious[1]
         avg_loss = self._loss_sum / max(1, self._n)
-        return {"loss": avg_loss, "miou": miou, "rock_iou": rock_iou}
+        # class_iou order: [regolith(0), rock(1), sky(2)]
+        return {"loss": avg_loss, "miou": miou, "rock_iou": rock_iou,
+                "class_iou": ious}
 
 
 # ---------------------------------------------------------------------------
@@ -276,10 +282,17 @@ def main() -> None:
 
     # ---- Training loop ----------------------------------------------------
     best_rock_iou  = -1.0
+    best_epoch     = -1
+    best_val_stats: dict | None = None
+    epochs_since_improve = 0
     metrics_path   = out_dir / "metrics.jsonl"
     best_ckpt_path = out_dir / "best.pt"
+    t_start        = time.time()
 
+    epochs_run = 0
     for epoch in range(1, args.epochs + 1):
+        epochs_run = epoch
+        t_epoch = time.time()
         # Train
         train_stats = run_epoch(
             model, train_loader, criterion, optimizer,
@@ -293,18 +306,23 @@ def main() -> None:
             device, is_segformer, train=False,
         )
 
-        lr_now = scheduler.get_last_lr()[0]
+        lr_now    = scheduler.get_last_lr()[0]
+        epoch_sec = time.time() - t_epoch
 
-        # Append to metrics.jsonl (one JSON object per line)
+        # Append to metrics.jsonl (one JSON object per line).
+        # class_iou order: [regolith(0), rock(1), sky(2)].
         row: dict = {
             "epoch":          epoch,
             "lr":             lr_now,
+            "epoch_sec":      epoch_sec,
             "train_loss":     train_stats["loss"],
             "train_miou":     train_stats["miou"],
             "train_rock_iou": train_stats["rock_iou"],
+            "train_class_iou": train_stats["class_iou"],
             "val_loss":       val_stats["loss"],
             "val_miou":       val_stats["miou"],
             "val_rock_iou":   val_stats["rock_iou"],
+            "val_class_iou":  val_stats["class_iou"],
         }
         with open(metrics_path, "a") as f:
             f.write(json.dumps(row) + "\n")
@@ -315,7 +333,10 @@ def main() -> None:
             and val_stats["rock_iou"] > best_rock_iou
         )
         if improved:
-            best_rock_iou = val_stats["rock_iou"]
+            best_rock_iou  = val_stats["rock_iou"]
+            best_epoch     = epoch
+            best_val_stats = val_stats
+            epochs_since_improve = 0
             torch.save(
                 {
                     "epoch":        epoch,
@@ -323,39 +344,60 @@ def main() -> None:
                     "state_dict":   model.state_dict(),
                     "val_rock_iou": best_rock_iou,
                     "val_miou":     val_stats["miou"],
+                    "val_class_iou": val_stats["class_iou"],
                     "args":         vars(args),
                 },
                 best_ckpt_path,
             )
             marker = "★ best"
         else:
+            epochs_since_improve += 1
             marker = ""
 
         print(
             f"  epoch {epoch:3d}/{args.epochs}"
+            f"  ({epoch_sec:5.1f}s)"
             f"  train_loss={train_stats['loss']:.4f}"
             f"  val_rock_iou={val_stats['rock_iou']:.4f}"
             f"  val_miou={val_stats['miou']:.4f}"
             f"  {marker}"
         )
 
+        # Early stopping on val rock-IoU
+        if args.patience > 0 and epochs_since_improve >= args.patience:
+            print(
+                f"[regolith/train] Early stop: no val rock-IoU improvement for "
+                f"{args.patience} epochs (best={best_rock_iou:.4f} @ epoch {best_epoch})."
+            )
+            break
+
+    wall_s = time.time() - t_start
+
     # ---- Final summary -----------------------------------------------------
+    best_class_iou = best_val_stats["class_iou"] if best_val_stats else None
     summary = {
         "model":          args.model,
-        "epochs_trained": args.epochs,
+        "epochs_requested": args.epochs,
+        "epochs_run":     epochs_run,
+        "best_epoch":     best_epoch,
         "best_val_rock_iou": best_rock_iou,
+        "best_val_miou":  best_val_stats["miou"] if best_val_stats else None,
+        "best_val_class_iou": best_class_iou,  # [regolith, rock, sky]
         "best_ckpt":      str(best_ckpt_path),
         "train_split":    str(args.train_split),
         "val_split":      str(args.val_split),
         "seed":           args.seed,
         "lr":             args.lr,
         "batch":          args.batch,
+        "patience":       args.patience,
+        "wall_time_s":    wall_s,
         "class_weights":  class_weights.cpu().tolist(),
     }
     with open(out_dir / "summary.json", "w") as f:
         json.dump(summary, f, indent=2)
 
-    print(f"\n[regolith/train] Done.  Best val rock-IoU: {best_rock_iou:.4f}")
+    print(f"\n[regolith/train] Done.  Best val rock-IoU: {best_rock_iou:.4f} "
+          f"(epoch {best_epoch}).  Wall time: {wall_s/60:.1f} min.")
     print(f"[regolith/train] Outputs: {out_dir}")
 
 

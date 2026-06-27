@@ -554,3 +554,121 @@ ssh spark "docker rm -f isaac-dev 2>/dev/null; \
 # …then remove isaac-dev, idle-reclaim gap, repeat for test_photoreal (seed 7777). NEVER chain splits in one container.
 ```
 
+---
+
+## Session 6 — 2026-06-27 — training the model + the size-matched DR ablation (Task 3)
+
+### Environment
+
+GPU training ran in a dedicated container, **separate from the Isaac Sim image** (training needs
+PyTorch + HuggingFace, not Omniverse):
+
+```bash
+# regolith-train: NGC PyTorch with transformers added
+docker run -d --name regolith-train --entrypoint bash --gpus all --network=host \
+  -v /home/chaotic-curiosity/regolith:/workspace/regolith:rw \
+  -v /home/chaotic-curiosity/regolith_data:/workspace/datasets:rw \
+  nvcr.io/nvidia/pytorch:26.03-py3 -lc 'pip install transformers && sleep infinity'
+```
+
+Versions inside the container: **torch 2.11.0a0 (nv26.03) · CUDA 13 · transformers 5.12.1 ·
+matplotlib 3.10.8**, GPU reports as **NVIDIA GB10**. No descriptor-leak problem here — that was
+an RTX/SDG render-loop issue (Session 5); plain PyTorch training is clean. Each epoch ran
+~16–18 s (750 frames) to ~31 s (1500 frames); co-tenants left running throughout.
+
+### Training-code fixes (reconciled into git this session)
+
+The training pipeline (`training/`, committed in Task-3-prep) ran on the first GPU attempt with
+no functional bugs — but it lacked the instrumentation a real ablation needs. The fixes
+(all in `training/train.py`, brought back from the Spark; `dataset.py`/`metrics.py`/`model.py`
+were unchanged, and `python -m pytest training/test_metrics.py training/test_dataset.py` still
+passes **33/33** locally):
+
+- **Early stopping** — new `--patience` flag (default 8) on val rock-IoU. Without it every run
+  would burn all 40 epochs well past its peak; with it, no-DR stopped at epoch 17, DR-750 at 31,
+  DR-1500 at 35.
+- **Per-class IoU** recorded everywhere — added `class_iou: [regolith, rock, sky]` to the
+  per-epoch `metrics.jsonl` row, to the saved checkpoint, and to `summary.json`. The headline
+  table needs the per-class breakdown, not just rock-IoU + mIoU.
+- **`best_epoch`, `epochs_run`, `epoch_sec`, `wall_time_s`** — timing + which epoch the saved
+  checkpoint came from, for the results table and the overfitting analysis.
+
+These are additive (no behavior change to the loss, optimizer, or metric definitions), so the
+checkpoints produced by the Spark copy are bit-for-bit what the committed code would produce.
+
+### The three runs (identical recipe; only the training data differs)
+
+Common: SegFormer-B0 (`nvidia/mit-b0` ImageNet encoder + fresh 3-class decode head),
+class-weighted CE (`ignore_index=255`, rock weight **~2.59** vs regolith/sky ~0.20),
+AdamW lr **6e-5**, cosine decay, batch **8**, seed **0**, patience **8**, max 40 epochs,
+**val split = `test_photoreal`** (unseen-domain generalization probe, not the training distribution).
+
+| Run | `--train-split` | Frames | DR? |
+|-----|-----------------|-------:|:---:|
+| `nodr_750` | `train_nodr` | 750 | no |
+| `dr_750` | `train_dr_750` | 750 | yes (size-matched) |
+| `dr_1500` | `train_dr` | 1500 | yes (deployed) |
+
+`train_dr_750` is the **first 750 frames of `train_dr`, symlinked** (`ln -s ../../train_dr/...`) —
+same generation, same seed lineage, truncated to match the control's count. That makes
+`dr_750` vs `nodr_750` an exact size-matched comparison: identical 750-frame budget, identical
+content distribution, the *only* difference is whether appearance was domain-randomized.
+
+### Results (best val checkpoint on `test_photoreal`; from each run's `summary.json`)
+
+| Run | rock-IoU | mIoU | regolith / rock / sky IoU | best epoch | wall |
+|-----|:--------:|:----:|:-------------------------:|:----------:|:----:|
+| `nodr_750` | 0.689 | 0.863 | 0.928 / 0.689 / 0.973 | 9 | 278 s |
+| `dr_750` | 0.788 | 0.903 | 0.947 / 0.788 / 0.974 | 23 | 507 s |
+| `dr_1500` | 0.815 | 0.914 | 0.952 / 0.815 / 0.975 | 27 | 1024 s |
+
+**Independent verification (no fabrication):** a fresh inference pass over all 300
+`test_photoreal` frames, straight from `best.pt`, reproduced the global pixel-pooled numbers —
+`nodr_750` → rock-IoU **0.6885** / mIoU **0.8629**, `dr_1500` → **0.8147** / **0.9139** — matching
+the training-time `summary.json` to the third decimal. The committed figures/overlays come from
+that same pass.
+
+### Honest interpretation
+
+- **Headline (size-matched DR):** rock-IoU **0.689 → 0.788 = +0.099 absolute (+14% relative)**,
+  dataset size held constant at 750. This isolates domain randomization from data quantity.
+- **Secondary (more data):** rock-IoU **0.788 → 0.815 = +0.027** going 750 → 1500 frames with DR
+  held constant. Real but ~⅓ the DR effect. Comparing the deployed 1500 directly against the
+  no-DR 750 (a +0.126 swing) would have **confounded** DR with data size — hence the symlinked
+  size-matched split.
+- The gains concentrate on **rock**. Regolith (0.928→0.952) and sky (0.973→0.975) were already
+  near-ceiling and barely move; DR buys exactly the hazard-class capability it was meant to.
+- **Mechanism = overfitting.** The no-DR model peaked at epoch 9 with train rock-IoU **0.830** but
+  val **0.689** (0.141 gap) and *rising* val loss — it memorized its one frozen appearance. The
+  DR model's **epoch-1** val rock-IoU (**0.712**) already beat no-DR's best-ever (0.689), because
+  randomized appearance leaves nothing to memorize. DR trains longer before plateauing (1024 s vs
+  278 s) — cheap for the capability.
+- **Caveat that governs the claim:** `test_photoreal` is **synthetic → synthetic** unseen-domain
+  transfer (held-out sim parameter ranges), **not** real lunar imagery. The +0.099 is a real
+  generalization result but not yet the sim-to-real number. That is Task 4 / chapter 04.
+
+### Post-processing (this session, Task 3 deliverables)
+
+- `docs/reports/assets/ablation-rockiou.png` — rock-IoU bar chart (matplotlib, local), annotated
+  with the +0.099 size-matched gain and the +0.027 more-data gain.
+- `docs/reports/assets/ablation-results.json` — full results table + verification numbers.
+- `docs/reports/assets/ablation-{00029,00118,00071,00154}.png` — 4-panel qualitative overlays
+  (RGB | GT | no-DR pred | DR-1500 pred), generated on the Spark from `best.pt`, fixed project
+  palette (rock = red). Frames span 2.7 %–30.4 % rock coverage; each shows DR recovering rocks
+  the no-DR model drops (e.g. 00118: no-DR labels a bright boulder as *sky*; 00154: no-DR hollows
+  a boulder's interior to regolith). DR beats no-DR on **267/300** frames; mean per-frame gain
+  **+0.077** rock-IoU (the four chosen overlays, +0.10–0.14, are above-average **legible** cases,
+  not the +0.3–0.5 outliers — stated plainly in the chapter).
+- `docs/reports/03-training.md` — chapter 03, house voice, ~2.8k words.
+
+Checkpoints (`best.pt`, ~15 MB each) **stay on the Spark** at
+`/home/chaotic-curiosity/regolith/outputs/runs/{nodr_750,dr_750,dr_1500}/` — heavy binaries,
+git-excluded. The committed artifacts are the figures, the results JSON, and the chapter.
+
+### Reproduce
+
+See `docs/reports/03-training.md` § Reproduce for the three `python training/train.py` commands
+(the size-matched `train_dr_750` symlink setup is the first block there). Figure regeneration is
+pure post-processing from the saved checkpoints — no retraining required.
+
+
