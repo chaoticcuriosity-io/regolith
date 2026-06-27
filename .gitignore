@@ -17,3 +17,15 @@ CLAUDE.md
 # re-include report embeds
 !docs/reports/assets/
 !docs/reports/assets/**
+
+# media: large renders never live in git. The full-resolution flythrough MP4
+# stays on the DGX Spark (regolith_render/) and is attached as a GitHub Release
+# asset at publish time. Only the small web preview under docs/reports/assets/
+# is allowed; everything else (and any stray render dirs) is excluded.
+*.mp4
+*.mov
+*.webm
+*.mkv
+regolith_render/
+render_out/
+!docs/reports/assets/render-preview.mp4

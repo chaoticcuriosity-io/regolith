@@ -746,4 +746,137 @@ Checkpoints stay on the Spark (git-excluded). Eval ran in `regolith-train`; outp
 See `docs/reports/04-sim-to-real.md` § Reproduce for the two `python eval/eval_{synth,real}.py`
 commands (run inside `regolith-train`).
 
+---
+
+## Session 8 — 2026-06-27 — cinematic RTX flythrough + live hazard overlay (Task 5)
+
+### Goal
+
+The portfolio money-shot: a high-quality RTX lunar flythrough with the deployed
+`dr_1500` hazard model's predictions overlaid live — a rover's-eye "hazard HUD."
+Two-stage pipeline (Isaac renders RGB; PyTorch overlays predictions), assembled to
+MP4 + stills + a web preview. Scripted in `render/render_predictions.py`
+(`render` / `overlay` / `assemble` subcommands).
+
+### Result
+
+**SUCCESS.** A 142-frame branded flythrough — a slow dolly forward into a boulder
+field with a gentle arc/pan/tilt — every boulder segmented as **rock (red + bright
+detection outline)**, traversable ground as **safe regolith (green tint)**, sky
+untouched. Predictions are the real `dr_1500` model's (mean rock fraction ~0.069,
+climbing 5→9% as the camera approaches). Assembled at **24 fps ⇒ 5.9 s**.
+
+- **Full-res MP4 (1920×1080, h264, faststart):**
+  `/home/chaotic-curiosity/regolith_render/regolith_flythrough.mp4` — **1.23 MB**
+  (stays on the Spark; git-excluded; a GitHub Release asset at publish).
+- Committed to `docs/reports/assets/`: `render-hero-{1..4}.png` (1536-wide stills),
+  `render-preview.mp4` (1280-wide, 0.18 MB), `render-preview.gif` (720-wide, 2.64 MB).
+
+### Scene + camera (kept IN-DISTRIBUTION so the overlay reads accurately)
+
+`build_lunar_stage(seed=7, HERO_PARAMS)` — a dramatic but in-distribution hero scene
+(every value inside the `train_dr.yaml` ranges): low sun **el 11°**, side-back **az
+122°** (long raking shadows; the dome sun-hole stays ~120° off-axis, far outside the
+frustum), intensity 17000, regolith albedo 0.19, terrain amp 3.7, ~95–125 rocks + 14
+near boulders, camera ~2.0 m / fov 62°. A single static stage; the camera MOVES over
+it (a 252-pose path: dolly **y −95→−63 m**, lateral arc ±7 m, slow yaw pan +6→−6°,
+eased tilt −1.5→−3°, subtle bob). Path saved to `regolith_render/camera_path.json`.
+
+### Render settings + timing
+
+1920×1080, **RayTracedLighting**, `rt_subframes=48`. Warm **~2.4 s/frame**; total
+**10.4 min** for the run. rgb_mean stabilises ~108 (the first ~2 captures fade in
+69→98→108; dropped via `--skip-head 2`).
+
+### The hard part — RTX color capture (root-caused empirically)
+
+**`BasicWriter` writes BLACK frames on this box.** It captures at step-time, BEFORE
+the RTX color pipeline (DLSS temporal accumulation + auto-exposure) converges, and
+persists an all-zero `LdrColor`. The *semantic* AOV was perfect throughout, which
+masked it as a "scene is fine, only RGB is black" puzzle. Confirmed with an annotator
+probe: a `BasicWriter` frame read **mean 0**, the **`LdrColor` annotator read mean ~64
+/ fully lit**. **Fix: capture via the `LdrColor` annotator, not BasicWriter, and save
+PNGs ourselves.**
+
+**The color pipeline needs a real-motion warmup before it goes lit.** After attach,
+the first ~5–100+ readbacks are black; only sustained camera motion (translation +
+the path's yaw/arc; static or tiny-jitter does NOT warm it — verified) drives DLSS/
+exposure to lit, after which it stays lit and stable. A separate warmup loop did not
+carry into the capture (latency-bound). **Robust fix: one continuous capture pass;
+SKIP-save until the readback mean > threshold, numbering saved frames contiguously**
+— so no black frame is ever written. The warmup length varies (it ate ~108 of the
+252 hero poses this run, leaving 144 lit frames = the dramatic *approach* segment).
+
+**Exposure is auto-exposed to ~mean 108–128 (brighter than training ~82) and the
+fixed-exposure settings tried (`/rtx/post/histogram/enabled`, `/rtx/post/tonemap/
+filmIso|cameraShutter|fNumber`) are IGNORED on this build** (iso 650 vs 1000 gave the
+same mean). Handled in Stage B with a `--display-gain 0.78` applied to the COMPOSITE
+ONLY — inference runs on the original pixels, so predictions are unchanged; the video
+just gets a more dramatic, in-distribution lunar grade.
+
+### Pipeline
+
+- **Stage A (`render`, Isaac):** build hero stage once → single render product + single
+  `LdrColor` annotator (reused across all poses) → per-pose: move camera, step, pump
+  convergence updates, read+save. Annotator+single-product reuse means NO per-frame
+  render-product/writer churn → the Session-5 descriptor leak is avoided.
+- **Stage B (`overlay`, PyTorch):** reuse `eval/_infer.py` (ImageNet norm + SegFormer
+  H/4→input upsample before argmax) on each frame downscaled to 1024×576, NEAREST-
+  upsample the mask to full res, composite (rock = semi-transp red + eroded-edge
+  outline; regolith = green tint; sky untouched), then brand (Chaotic Curiosity
+  wordmark + caption + legend + corner ticks). `dr_1500/best.pt`.
+- **Stage C (`assemble`, host ffmpeg):** full-res faststart MP4 + 4 hero stills +
+  a web preview MP4 + a GIF. Run on the **host** (`regolith-train`/overlay containers
+  have no ffmpeg; the host does).
+
+### Leak-safe approach used (RTX descriptor-leak rule)
+
+- ONE fresh Isaac container; ONE render product + ONE annotator reused across all poses
+  (no per-frame churn); ~260 `orchestrator.step()` calls total — well under the
+  ~300-frame-in-one-container / ~1500 clean-pool budgets. Memory ample; co-tenants
+  could stay up (I stopped `open-webui`/`ollama-compose` only while diagnosing the
+  black-frame issue, then restored them).
+- **New gotcha 13 — do NOT `docker rm -f` an Isaac container mid shader-compile.** It
+  leaves a stale `regolith_cache/ov/_cache.lock`; the NEXT container then HANGS at boot
+  (SimulationApp never starts, GPU 0%, only the config line logged). Fix: remove the
+  lock (`rm` it, or via a throwaway uid-1234 container since it's container-owned) and
+  relaunch. Let renders finish cleanly instead of force-killing.
+
+### Where things live
+
+- Full MP4: `/home/chaotic-curiosity/regolith_render/regolith_flythrough.mp4` (1.23 MB).
+- RGB frames: `regolith_render/rgb/`; overlays: `regolith_render/overlay/`; stills:
+  `regolith_render/stills/`; camera path + render meta: `regolith_render/camera_path.json`.
+- Committed (git): `render/render_predictions.py`, `docs/reports/assets/render-hero-*.png`,
+  `render-preview.mp4`, `render-preview.gif`. `.gitignore` excludes `*.mp4` /
+  `regolith_render/` except the negated `docs/reports/assets/render-preview.mp4`.
+
+### Reproduce
+
+```bash
+# Stage A — render RGB (fresh Isaac container; warm shader cache; let it FINISH cleanly)
+ssh spark "docker run -d --name isaac-render --entrypoint bash --gpus all --network=host \
+  -e ACCEPT_EULA=Y -e PRIVACY_CONSENT=Y \
+  -v /home/chaotic-curiosity/regolith:/workspace/regolith:rw \
+  -v /home/chaotic-curiosity/regolith_render:/workspace/render_out:rw \
+  -v /home/chaotic-curiosity/regolith_cache:/isaac-sim/.cache:rw \
+  nvcr.io/nvidia/isaac-sim:6.0.0 -lc 'sleep infinity'"
+ssh spark "docker exec isaac-render bash -lc 'cd /workspace/regolith && /isaac-sim/python.sh \
+  render/render_predictions.py render --out /workspace/render_out --seed 7 --frames 252 \
+  --width 1920 --height 1080 --renderer RayTracedLighting --subframes 48 \
+  --prime-steps 8 --lit-threshold 50'"
+ssh spark "docker rm -f isaac-render"   # clean shutdown, no force-kill mid-compile
+
+# Stage B — overlay predictions + branding (PyTorch container with transformers)
+ssh spark "docker exec regolith-overlay bash -lc 'cd /workspace/regolith && python \
+  render/render_predictions.py overlay --checkpoint outputs/runs/dr_1500/best.pt \
+  --rgb-dir /workspace/render_out/rgb --out /workspace/render_out/overlay \
+  --display-gain 0.78 --skip-head 2'"
+
+# Stage C — assemble MP4 + stills + preview (host ffmpeg)
+ssh spark "python3 /home/chaotic-curiosity/regolith/render/render_predictions.py assemble \
+  --overlay-dir /home/chaotic-curiosity/regolith_render/overlay \
+  --out /home/chaotic-curiosity/regolith_render --fps 24"
+```
+
 
