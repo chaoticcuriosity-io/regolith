@@ -294,3 +294,142 @@ ssh spark "docker exec isaac-dev bash -lc 'rm -rf /workspace/out/labelid /worksp
 # 4. Tear down + restart co-tenants
 ssh spark "docker rm -f isaac-dev; docker start open-webui ollama-compose compose-arangodb-1"
 ```
+
+---
+
+## Session 4 — 2026-06-27 — domain randomization + SDG pipeline (Task 2)
+
+### Goal
+
+Task 2: build the domain-randomized synthetic-data-generation pipeline — refactor the
+scene builder to be params-driven, add a randomizer + dataset generator + per-split
+configs, validate a small batch on the Spark, and launch the full dataset generation
+detached. Datasets live on the Spark (`/home/chaotic-curiosity/regolith_data/`), not git.
+
+### Result
+
+**SUCCESS.** SDG pipeline validated end-to-end at 512² (20 `train_dr` + 10
+`test_photoreal` frames, **all zero unlabeled** after the azimuth fix below), then the
+full generation (1500 / 750 / 300 = **2550 frames**) launched detached. Warm throughput
+**~1.5 s/frame** (subframes=3) / **~1.7 s/frame** (subframes=12); cold first frame ~157 s,
+amortized by the persistent chmod-777 shader cache.
+
+### Prerequisite refactor — `scene/build_lunar_stage.py`
+
+- **`canonical_mask_from_json(raw_id_array, labels_json_path)`** — module-level helper
+  mapping Replicator **raw** semantic ids → canonical `{regolith:0, rock:1, sky:2}` (bg/
+  unlabeled → **255**). Mapping derived from the labels-JSON class **names**
+  (`.strip().lower()`), never hardcoded raw ints (Replicator numbers classes dynamically:
+  0=BACKGROUND, 1=UNLABELLED, then 2=sky, 3=rock, 4=regolith for this scene). Raises
+  `RuntimeError` if the JSON is missing/empty. `__main__`'s verify path now calls it.
+- **`build_lunar_stage(seed, params=None)`** — every DR-able literal (sun el/az/intensity,
+  regolith albedo/roughness, terrain amplitude, rock/crater count ranges, rock + near-rock
+  scale, near-rock band, embedding depth, camera height/pitch/FOV, dome radius, star count)
+  reads from `params` with the validated literals as defaults (`DEFAULT_PARAMS`). Structural
+  constants promoted to module level (`TERRAIN_SIZE_M`, `SUN_COLOR`, `ROCK_DIFFUSE`, …).
+  `params is None` reproduces the Session-3 nominal (camera lens reconstructed from FOV+pitch
+  defaults that match the old focal=20/target look to ~1e-5).
+- **Decoupled scene-count RNG** — `n_rocks`/crater counts drawn from a dedicated
+  `RandomState(seed ^ 0xA11CE)` so sweeping one DR knob (which consumes a variable number of
+  `rng` draws) doesn't shift the counts. (Side effect: the per-seed count for a given seed
+  differs from Session 3 — expected; re-validated.)
+- Tidies: verify path now asserts **exactly one** seg PNG + one labels JSON; Pass B drain
+  budget tightened to 90 s (warm); `looks` Scope annotated as a side-effecting prim def.
+
+### SDG code
+
+- **`replicator/randomizers.py` → `sample_params(rng, cfg)`** — draws a `params` dict.
+  *Scalar knobs* (sun, albedo, roughness, terrain amp, embedding, camera, star count) get
+  one fresh uniform draw/frame from `cfg["ranges"]`. *Range pass-through knobs* (crater/rock
+  count, rock + near-rock scale, near-rock band) are handed through as ranges — per-element
+  variation happens inside the builder. `mode: nodr` returns the fixed `cfg["nominal"]`
+  (no draws) — the ablation control. Output is JSON-clean (Python float/int).
+- **`replicator/generate_dataset.py`** — `--config --n --out --seed [--res 512] [--subframes]
+  [--mode] [--start-index] [--preview-stride]`. Reuses **one** SimulationApp; per frame:
+  `new_stage()` → `build_lunar_stage(seed_i, params_i)` → one render product on
+  `/World/RoverCam` → `BasicWriter(colorize=False)` → validated poll-drain → remap via
+  `canonical_mask_from_json` → save `rgb/rgb_XXXXX.png` + `mask/mask_XXXXX.png` (uint8
+  {0,1,2,255}). Writes `frames.jsonl` (crash-safe), `manifest.json` (class map, per-frame
+  seed+params, aggregate class fractions), `progress.txt` (live ETA). Colormap previews
+  every `--preview-stride` frames (pure numpy on the canonical mask — no second render pass).
+- **`replicator/configs/`** — `train_dr.yaml` (wide DR), `train_nodr.yaml` (frozen domain,
+  same content distribution = ablation control), `test_photoreal.yaml` (subframes=12 +
+  UNSEEN ranges: higher/brighter sun, brighter+smoother regolith, rougher terrain, bigger
+  rocks, higher+wider+down-pitched camera = the domain-gap eval split).
+
+### Small-batch validation (proof)
+
+- **train_dr** (20 frames, subframes=3, 512²): mask ids exactly `{0,1,2}`, **0 unlabeled**;
+  per-class fractions regolith ~0.49 / **rock mean ≈ 0.038 (range 0.010–0.079)** / sky ~0.46.
+- **test_photoreal** (10 frames, subframes=12): ids `{0,1,2}`, **0 unlabeled**; rock spans
+  0.014–0.534 (large near-field boulders fill some frames — intended for the harder split).
+- **rock = id 1 confirmed** — visually (preview red blob aligns pixel-perfect with the RGB
+  boulder) and statistically (rock is the sparse few-% class; regolith/sky dominate — not
+  scrambled). RGB sane: mean ~82, p99 215, lit not black.
+
+### New gotchas (Task 2)
+
+**Gotcha 11 — full sun-azimuth DR puts the sky-dome's sun-hole IN FRAME → unlabeled pixels.**
+The dome cuts a 34° cap around the sun so the DistantLight escapes (Session-3 Gotcha 8). With
+the Session-3 fixed az=120 the hole was safely off the optical axis, but randomizing azimuth
+over `[0,360]` swings it into the forward frustum at low sun → the camera sees through to the
+void → 8–36 % BACKGROUND (→255) pixels. **Fix:** constrain `sun_azimuth_deg` to **`[100,260]`**
+(camera looks +Y / az≈0; this keeps the hole ≥ ~57° off-axis even at the worst corner with a
+512² camera offset −90 m in Y). Trade-off: sun stays in the rear/side hemisphere (back/side
+lighting only) — a documented limitation of the procedural-dome approach, not a bug. After the
+fix: 30/30 small-batch frames had **0 unlabeled**.
+
+**Gotcha 12 — RayTracedLighting renders internally at ~256² then DLSS-upscales to 512².**
+Log warns `DLSS … Render resolution of (256, 256) is below minimal input resolution of 300`.
+Benign for us: the **semantic mask is exact at native 512²** (seg is not DLSS-upscaled); only
+the RGB is mildly softened — acceptable for a training set, and it makes subframe count nearly
+free (subframes 3 vs 12 ≈ 1.5 s vs 1.7 s/frame). If crisper RGB is ever needed, disable DLSS or
+raise resolution.
+
+**Note — no memory leak across frames.** Per-frame render-product `.destroy()` + writer
+`.detach()` keep usage flat; the container sits at ~80 MiB idle between SimulationApp runs and
+Isaac peaks ~7 GiB during generation. 103 GiB stayed free with all co-tenants up.
+
+### Memory / co-tenant handling
+
+Available memory was **ample (110 GiB at idle)**, Isaac peaks ~7 GiB, so per the run-pattern
+guidance the co-tenants (`open-webui`, `ollama-compose`, `compose-arangodb-1`) were **LEFT
+RUNNING** for the multi-hour job (103 GiB free during generation — comfortable margin). No
+`free_memory.sh` needed this session.
+
+### Full generation — chosen counts + launch
+
+- **Counts (final): 1500 `train_dr` + 750 `train_nodr` + 300 `test_photoreal` = 2550 frames.**
+  At ~1.5–1.7 s/frame this is **~75 min wall-clock** — far inside the 6–8 h budget (the
+  measured throughput let us hit the full target rather than scaling down). Sized as a demo to
+  show the DR-vs-no-DR lesson, not production scale.
+- **Launched detached** inside the persistent `isaac-dev` container via `docker exec -d`,
+  chaining the three splits sequentially, logging to `/home/chaotic-curiosity/regolith_data/gen.log`.
+  Each split writes its own `progress.txt` + `manifest.json`. Datasets live under
+  `/home/chaotic-curiosity/regolith_data/{train_dr,train_nodr,test_photoreal}/` — **not in git**.
+
+### Reproduce
+
+```bash
+# 0. Persistent dev container (warm shader cache; data dir chmod 777; co-tenants left up)
+ssh spark "mkdir -p /home/chaotic-curiosity/regolith_data && chmod 777 /home/chaotic-curiosity/regolith_data \
+  && docker run -d --name isaac-dev --entrypoint bash --gpus all --network=host \
+       -e ACCEPT_EULA=Y -e PRIVACY_CONSENT=Y \
+       -v /home/chaotic-curiosity/regolith:/workspace/regolith:rw \
+       -v /home/chaotic-curiosity/regolith_data:/workspace/data:rw \
+       -v /home/chaotic-curiosity/regolith_cache:/isaac-sim/.cache:rw \
+       nvcr.io/nvidia/isaac-sim:6.0.0 -lc 'sleep infinity'"
+
+# 1. Sync code (no local rsync on the Windows box -> tar over ssh)
+#    tar --exclude=__pycache__ -cf - scene replicator | ssh spark "cd /home/chaotic-curiosity/regolith && tar -xf -"
+
+# 2. Launch full generation (detached; survives the launching shell)
+ssh spark "docker exec -d isaac-dev bash -lc '
+  cd /workspace/regolith
+  /isaac-sim/python.sh replicator/generate_dataset.py --config replicator/configs/train_dr.yaml      --n 1500 --out /workspace/data/train_dr       --seed 42   --res 512 >> /workspace/data/gen.log 2>&1
+  /isaac-sim/python.sh replicator/generate_dataset.py --config replicator/configs/train_nodr.yaml    --n 750  --out /workspace/data/train_nodr     --seed 42   --res 512 >> /workspace/data/gen.log 2>&1
+  /isaac-sim/python.sh replicator/generate_dataset.py --config replicator/configs/test_photoreal.yaml --n 300  --out /workspace/data/test_photoreal --seed 7777 --res 512 >> /workspace/data/gen.log 2>&1'"
+
+# 3. Check progress (one-liner)
+ssh spark "cat /home/chaotic-curiosity/regolith_data/{train_dr,train_nodr,test_photoreal}/progress.txt 2>/dev/null; tail -3 /home/chaotic-curiosity/regolith_data/gen.log"
+```
