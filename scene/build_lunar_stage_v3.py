@@ -9,10 +9,12 @@ a flat-ish look. v3 is a fidelity jump aimed at a beauty-plate look test (NO dat
   1. REGOLITH GROUND (biggest change): high-resolution heightfield carrying a
      MULTI-SCALE CRATER field (a few big + many medium + many small, each a bowl
      interior + raised rim) plus rolling hills, fBm surface roughness, and fine
-     grain — all carried in GEOMETRY (v2 proved displayColor/texture primvars do
-     not render on this Isaac 6.0 / Hydra build). Dark lunar regolith PBR
-     (albedo ~0.10–0.12, high roughness). A rough/cratered ground is both prettier
-     AND the sim-to-real fix (v2's smooth ground let the model learn "rough=rock").
+     grain — all carried in GEOMETRY. Dark lunar regolith PBR (albedo ~0.10–0.12,
+     high roughness) plus a tiling tangent-space REGOLITH NORMAL MAP (UsdUVTexture
+     -> normal, world-XY st) that adds tactile sub-mesh-res relief the heightfield
+     can't carry (pits/grain that catch the raking sun). A rough/cratered ground is
+     both prettier AND the sim-to-real fix (v2's smooth ground let the model learn
+     "rough=rock").
   2. ROCKS — POWER-LAW size distribution: thousands of instances spanning >2 orders
      of magnitude — MANY tiny pebbles, fewer small/mid rocks (a USD PointInstancer
      over a pool of noise-displaced basalt prototypes), and a FEW large hand-placed
@@ -20,9 +22,13 @@ a flat-ish look. v3 is a fidelity jump aimed at a beauty-plate look test (NO dat
   3. LIGHTING: harsh LOW sun (~12° elevation), long hard-edged shadows, pure black
      sky with crisp stars, high contrast — real airless-body lighting. A small,
      tasteful Earth low on the horizon (optional).
-  4. A procedural ROVER (chassis + 6 wheels + rocker struts + camera mast + RTG +
-     high-gain antenna) placed on the surface. Recognizable rover silhouette;
-     reliable on headless aarch64 (no fiddly asset import).
+  4. ROVER — PREMIUM real-model path: references an external rover USD (NASA
+     public-domain Mars 2020 Perseverance, glb->USD, full PBR incl. gold-foil /
+     metal / treaded wheels / rocker-bogie / mast), stood on the surface and faced
+     down-traverse. Falls back to a procedural rover (chassis + 6 wheels + struts +
+     mast + RTG + antenna) if the asset is absent, so the script runs anywhere.
+     The biggest in-frame BOULDERS are fractured/angular dark basalt (rock material
+     hue is locked grey — no pink tint).
 
 Cameras authored:
   /World/BeautyCam   — third-person hero: rover on the cratered surface among boulders.
@@ -35,7 +41,10 @@ mount) — renders one 1920x1080 RGB beauty plate per camera into <out>/<camname
   /isaac-sim/python.sh build_lunar_stage_v3.py
 
 Env knobs: V3_SEED, V3_W, V3_H, V3_SUBFRAMES, V3_RENDERER (RayTracedLighting|PathTracing),
-V3_PATHTRACE (0/1), SMOKE_OUT (output dir).
+V3_PATHTRACE (0/1), V3_PT_TOTALSPP, V3_PT_BOUNCES, V3_ROVER_USD, V3_ROVER_SCALE,
+V3_REGOLITH_NORMAL, V3_REGOLITH_TILE, SMOKE_OUT (output dir). The showpiece stills
+use path tracing (soft contact shadows + regolith GI bounce); the dataset will render
+the same geometry/materials under faster RayTracedLighting.
 
 RTX descriptor-leak rule (see scripts/run_isaac.sh + dgx-spark manual): fresh
 container, poll-for-files drain (NOT bare wait_until_complete), ≤300 frames/session.
@@ -48,6 +57,27 @@ import math
 
 CLASS_MAP = {"regolith": 0, "rock": 1, "sky": 2}
 IGNORE_INDEX = 255
+
+
+def _resolve_asset(env_var, default_path, rel_path):
+    """Resolve an external asset path. Order: $env_var -> default_path (the canonical
+    Spark location) -> <script_dir>/../rel_path (repo-relative, for checkouts off the
+    Spark). Returns the first that exists, else default_path so the caller's isfile()
+    check drives the graceful fallback (procedural rover / no normal map)."""
+    import os
+    p = os.environ.get(env_var, "")
+    if p:
+        return p
+    if os.path.isfile(default_path):
+        return default_path
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        cand = os.path.normpath(os.path.join(here, "..", rel_path))
+        if os.path.isfile(cand):
+            return cand
+    except Exception:
+        pass
+    return default_path
 
 
 # =========================================================================== #
@@ -225,6 +255,43 @@ def _displace_rock(base_dirs, rng, amp=0.34):
     return dirs * radius[:, None]
 
 
+def _displace_rock_angular(base_dirs, rng, amp=0.40, n_facets=8):
+    """Like _displace_rock but FRACTURED/ANGULAR — for the big hero boulders.
+
+    Stronger, sharper ridges, then a handful of random cutting planes shear the
+    outer shell flat, carving genuine angular facets (fractured basalt) instead of
+    a rounded lump. Pair with flat (faceted) shading at author time."""
+    import numpy as np
+    dirs = np.asarray(base_dirs, dtype=np.float64)
+    off = rng.uniform(-41.0, 41.0, size=3)
+    aniso = rng.uniform(0.80, 1.45, size=3)
+    P = dirs * aniso[None, :] + off[None, :]
+    seed_a = int(rng.randint(1, 1_000_000))
+    seed_b = int(rng.randint(1, 1_000_000))
+    bf = float(rng.uniform(1.05, 1.6))
+    lump = _fbm_3d(P, seed_a, octaves=4, base_freq=bf * 0.85, lacunarity=2.05, gain=0.5)
+    rid = _fbm_3d(P * 1.7, seed_b, octaves=4, base_freq=bf, lacunarity=2.25, gain=0.5)
+    rid = 1.0 - np.abs(rid)
+    rid = rid ** 3                                  # sharper ridge crests
+    med = _fbm_3d(P * 3.0, seed_a + 401, octaves=3, base_freq=bf * 1.7, lacunarity=2.3, gain=0.5)
+    a_lump = float(amp) * rng.uniform(0.80, 1.00)
+    a_rid = float(amp) * rng.uniform(0.45, 0.68)    # stronger ridges than rounded rock
+    a_med = float(amp) * rng.uniform(0.10, 0.16)
+    radius = 1.0 + a_lump * lump + a_rid * (rid - 0.5) * 2.0 + a_med * med
+    radius = np.clip(radius, 0.55, 1.95)
+    pts = dirs * radius[:, None]
+    # Fracture: clip points beyond a few random planes back ONTO the plane -> facets.
+    for _ in range(int(n_facets)):
+        nrm = rng.normal(size=3)
+        nrm = nrm / (np.linalg.norm(nrm) + 1e-9)
+        proj = pts @ nrm
+        d = float(rng.uniform(0.60, 0.90)) * float(proj.max())
+        over = proj > d
+        if np.any(over):
+            pts[over] -= np.outer(proj[over] - d, nrm)
+    return pts
+
+
 def _sample_height(Zgrid, xs, ys, px, py):
     import numpy as np
     nx = len(xs); ny = len(ys)
@@ -360,17 +427,53 @@ def _make_preview_material(stage, path, diffuse, roughness, metallic=0.0, emissi
     return mat
 
 
+def _make_regolith_material_normalmapped(stage, path, diffuse, roughness, emissive,
+                                         normal_path, st_name="st"):
+    """UsdPreviewSurface regolith material with a tiling tangent-space NORMAL map
+    (UsdUVTexture -> normal). Adds tactile sub-mesh-res relief the heightfield can't
+    carry. st is supplied by the bound mesh's primvars:st (world-XY / tile)."""
+    from pxr import UsdShade, Sdf, Gf
+    mat = UsdShade.Material.Define(stage, path)
+    shader = UsdShade.Shader.Define(stage, path + "/Shader")
+    shader.CreateIdAttr("UsdPreviewSurface")
+    shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*diffuse))
+    shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(float(roughness))
+    shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(0.0)
+    if emissive is not None:
+        shader.CreateInput("emissiveColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*emissive))
+    streader = UsdShade.Shader.Define(stage, path + "/stReader")
+    streader.CreateIdAttr("UsdPrimvarReader_float2")
+    streader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set(st_name)
+    st_out = streader.CreateOutput("result", Sdf.ValueTypeNames.Float2)
+    tex = UsdShade.Shader.Define(stage, path + "/NormalTex")
+    tex.CreateIdAttr("UsdUVTexture")
+    tex.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(normal_path)
+    tex.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(st_out)
+    tex.CreateInput("wrapS", Sdf.ValueTypeNames.Token).Set("repeat")
+    tex.CreateInput("wrapT", Sdf.ValueTypeNames.Token).Set("repeat")
+    tex.CreateInput("sourceColorSpace", Sdf.ValueTypeNames.Token).Set("raw")
+    tex.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(Gf.Vec4f(2.0, 2.0, 2.0, 1.0))
+    tex.CreateInput("bias", Sdf.ValueTypeNames.Float4).Set(Gf.Vec4f(-1.0, -1.0, -1.0, 0.0))
+    tex_rgb = tex.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
+    shader.CreateInput("normal", Sdf.ValueTypeNames.Normal3f).ConnectToSource(tex_rgb)
+    mat.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+    return mat
+
+
 def _make_rock_material_pool(stage, base_path, rng, n, albedo_range, rough_range, emissive=0.0):
     import numpy as np
     mats = []
     lo, hi = float(albedo_range[0]), float(albedo_range[1])
     rlo, rhi = float(rough_range[0]), float(rough_range[1])
-    tint = np.array([1.035, 1.00, 0.955], dtype=np.float64)
+    # Neutral grey basalt — NO warm/pink hue. The earlier warm per-channel tint
+    # ([1.035,1.0,0.955]) plus per-channel jitter pushed the lightest boulders
+    # PINK. Lock hue to grey; jitter BRIGHTNESS only (same delta on all channels).
+    tint = np.array([1.0, 1.0, 1.0], dtype=np.float64)
     em = float(emissive)
     for k in range(int(n)):
         b = lo + (hi - lo) * float(rng.uniform(0.0, 1.0)) ** 1.6
-        jitter = rng.uniform(-0.006, 0.006, size=3)
-        diffuse = np.clip(b * tint + jitter, 0.02, 0.55)
+        j = float(rng.uniform(-0.010, 0.010))
+        diffuse = np.clip(b * tint + j, 0.02, 0.55)
         rough = float(rng.uniform(rlo, rhi))
         mat = _make_preview_material(
             stage, "%s/RockMat_%02d" % (base_path, k),
@@ -553,7 +656,48 @@ def _stamp_crater(Z, xs, ys, cx, cy, R, depth, rim):
 
 
 # =========================================================================== #
-# Procedural rover.
+# Real-model rover (referenced external USD) — PREMIUM path.
+# =========================================================================== #
+def _reference_rover_usd(stage, root_path, usd_path, base_xy, ground_z, heading_deg,
+                         scale=1.0, wheel_local_z=-1.0, sink=0.09):
+    """Reference an external rover USD (NASA public-domain Mars 2020 Perseverance,
+    converted glb->USD) and stand it on the surface.
+
+    The asset's FRONT is -Y in its own frame, so we add a 180 deg yaw to face
+    scene-forward (+Y) before the scene heading. Wheels rest at local z=wheel_local_z
+    (the asset's bbox floor); we lift them onto ``ground_z`` and sink a few cm for
+    contact. Returns the hazard-cam mount (world pos + forward dir)."""
+    from pxr import UsdGeom, Gf
+    xform = UsdGeom.Xform.Define(stage, root_path)
+    xform.GetPrim().GetReferences().AddReference(usd_path)
+    yaw_total = float(heading_deg) + 180.0
+    m_scale = Gf.Matrix4d().SetScale(Gf.Vec3d(scale, scale, scale))
+    m_yaw = Gf.Matrix4d().SetRotate(Gf.Rotation(Gf.Vec3d(0, 0, 1), yaw_total))
+    lift = -float(wheel_local_z) * float(scale)
+    m_tr = _trans(base_xy[0], base_xy[1], ground_z + lift - float(sink))
+    _set_transform(xform.GetPrim(), m_scale * m_yaw * m_tr)
+
+    # Hazard / nav-cam POV: position the camera AHEAD of and ABOVE the rover's
+    # front edge (the 3.1 m rover spans ~1.5 m forward of centre + a ~2.8 m mast),
+    # then look forward & slightly down. Placing it clear of the body is essential —
+    # mounting near the rover centre lands the camera INSIDE the mesh -> black frame.
+    yaw_scene = Gf.Matrix4d().SetRotate(Gf.Rotation(Gf.Vec3d(0, 0, 1), float(heading_deg)))
+    down_deg = -13.0
+    fwd_local = Gf.Vec3d(0.0, math.cos(math.radians(down_deg)), math.sin(math.radians(down_deg)))
+    fwd_world = yaw_scene.TransformDir(fwd_local)
+    fwd_xy = yaw_scene.TransformDir(Gf.Vec3d(0.0, 1.0, 0.0))
+    front_off = 2.0 * float(scale)            # clear of the front mast/deck
+    hx = base_xy[0] + float(fwd_xy[0]) * front_off
+    hy = base_xy[1] + float(fwd_xy[1]) * front_off
+    haz_h = ground_z + 2.2 * float(scale)     # ~mast-cam height
+    return {
+        "hazard_pos": (hx, hy, haz_h),
+        "hazard_fwd": (float(fwd_world[0]), float(fwd_world[1]), float(fwd_world[2])),
+    }
+
+
+# =========================================================================== #
+# Procedural rover (fallback when no rover USD is available).
 # =========================================================================== #
 def _author_rover(stage, root_path, base_xy, ground_z, heading_deg, mats):
     """Author a recognizable 6-wheel rover (Curiosity/Perseverance-style silhouette).
@@ -643,6 +787,7 @@ def build_lunar_stage_v3(seed: int, params: dict | None = None):
     """Author the v3 lunar scene + rover + cameras into the current USD context.
 
     Returns a list of (camera_name, camera_prim_path) for the render harness."""
+    import os
     import numpy as np
     from pxr import UsdGeom, UsdLux, Gf
 
@@ -668,15 +813,37 @@ def build_lunar_stage_v3(seed: int, params: dict | None = None):
     # Dark grey regolith: gray albedo carrying a faint warm tint + faint emissive floor.
     regolith_diffuse = tuple(float(c) for c in (reg_a * tint))
     reg_em = float(p["regolith_emissive"])
-    regolith_mat = _make_preview_material(
-        stage, "/World/Looks/RegolithMat",
-        diffuse=regolith_diffuse, roughness=float(p["regolith_roughness"]), metallic=0.0,
-        emissive=(reg_em * 1.03, reg_em, reg_em * 0.95),
-    )
+    reg_emissive = (reg_em * 1.03, reg_em, reg_em * 0.95)
+    # Tiling regolith NORMAL map (tactile sub-mesh-res relief). Used when present;
+    # otherwise fall back to the plain (smooth-between-pebbles) regolith material.
+    normal_path = _resolve_asset(
+        "V3_REGOLITH_NORMAL",
+        "/home/chaotic-curiosity/regolith/assets/regolith_normal.png",
+        "assets/regolith_normal.png")
+    regolith_tile = float(os.environ.get("V3_REGOLITH_TILE", "5.0"))
+    use_normal = bool(normal_path) and os.path.isfile(normal_path)
+    if use_normal:
+        regolith_mat = _make_regolith_material_normalmapped(
+            stage, "/World/Looks/RegolithMat", diffuse=regolith_diffuse,
+            roughness=float(p["regolith_roughness"]), emissive=reg_emissive,
+            normal_path=normal_path)
+    else:
+        regolith_mat = _make_preview_material(
+            stage, "/World/Looks/RegolithMat",
+            diffuse=regolith_diffuse, roughness=float(p["regolith_roughness"]), metallic=0.0,
+            emissive=reg_emissive,
+        )
     rock_mat_rng = np.random.RandomState((int(seed) * 2246822519 + 0x20C) & 0x7FFFFFFF)
     rock_mats = _make_rock_material_pool(
         stage, "/World/Looks", rock_mat_rng, 12,
         p["rock_albedo_range"], p["rock_roughness_range"], emissive=float(p["rock_emissive"]),
+    )
+    # Dark neutral basalt for the biggest fractured hero boulders (darker than the
+    # scatter pool so they read as heavy, in-frame basalt rather than light lumps).
+    boulder_dark_mat = _make_preview_material(
+        stage, "/World/Looks/BoulderDarkMat",
+        diffuse=(0.038, 0.038, 0.040), roughness=0.93, metallic=0.0,
+        emissive=(float(p["rock_emissive"]),) * 3,
     )
     sky_mat = _make_preview_material(
         stage, "/World/Looks/SkyMat", diffuse=(0, 0, 0), roughness=1.0, metallic=0.0,
@@ -753,6 +920,17 @@ def build_lunar_stage_v3(seed: int, params: dict | None = None):
     face_indices = np.stack([i00, i10, i11, i01], axis=1).ravel()
     face_counts = np.full(res * res, 4, dtype=np.int32)
     regolith_prim = _author_mesh(stage, "/World/Regolith", points, face_counts, face_indices, normals=normals)
+    # World-XY st (tiled every ``regolith_tile`` m) so the normal map repeats across
+    # the terrain at a fixed physical scale.
+    if use_normal:
+        from pxr import Sdf, Vt
+        st = np.stack([X.ravel() / regolith_tile, Y.ravel() / regolith_tile], axis=1).astype(np.float32)
+        stpv = UsdGeom.PrimvarsAPI(regolith_prim).CreatePrimvar(
+            "st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex)
+        try:
+            stpv.Set(Vt.Vec2fArray.FromNumpy(st))
+        except Exception:
+            stpv.Set(Vt.Vec2fArray([(float(a), float(b)) for a, b in st]))
     _bind_material(regolith_prim, regolith_mat)
     _add_semantics(regolith_prim, "regolith")
 
@@ -826,10 +1004,19 @@ def build_lunar_stage_v3(seed: int, params: dict | None = None):
     ]
     for hi, (hx, hy, hs) in enumerate(hero_specs):
         h_rng = np.random.RandomState((int(seed) * 524287 + hi * 1301 + 3) & 0x7FFFFFFF)
-        subdiv = 5 if hs >= 3.0 else 4
+        # The prominent in-frame boulders (3 flanking the rover) + the genuinely
+        # big ones -> angular fractured + dark basalt. Mid/far stay rounded/varied.
+        big = (hi < 3) or (hs >= 2.3)
+        subdiv = 5 if (big or hs >= 3.0) else 4   # finer facets on the angular ones
         bp, bf = _icosphere(subdiv)
-        dp = _displace_rock(bp, h_rng, amp=disp_amp)
-        nn = _vertex_normals(dp, bf)
+        if big:
+            dp = _displace_rock_angular(bp, h_rng, amp=disp_amp * 1.15)
+            nn = None                                  # flat/faceted -> angular read
+            hero_mat = boulder_dark_mat                # darker basalt
+        else:
+            dp = _displace_rock(bp, h_rng, amp=disp_amp)
+            nn = _vertex_normals(dp, bf)
+            hero_mat = rock_mats[h_rng.randint(len(rock_mats))]
         prim = _author_mesh(stage, "/World/HeroRocks/Hero_%02d" % hi, dp,
                             np.full(len(bf), 3, dtype=np.int32), bf.ravel(), normals=nn)
         sx = hs * h_rng.uniform(0.85, 1.25)
@@ -843,7 +1030,7 @@ def build_lunar_stage_v3(seed: int, params: dict | None = None):
                * Gf.Rotation(Gf.Vec3d(0, 0, 1), h_rng.uniform(0, 360)))
         m_rot = Gf.Matrix4d().SetRotate(rot)
         _set_transform(prim, m_scale * m_rot * _trans(hx, hy, cz))
-        _bind_material(prim, rock_mats[h_rng.randint(len(rock_mats))])
+        _bind_material(prim, hero_mat)
         _add_semantics(prim, "rock")
 
     # --- Sun (harsh distant light, low elevation) -------------------------- #
@@ -896,12 +1083,27 @@ def build_lunar_stage_v3(seed: int, params: dict | None = None):
         _add_semantics(earth.GetPrim(), "sky")
 
     # --- Rover ------------------------------------------------------------- #
+    # PREMIUM path: reference the NASA public-domain Mars 2020 Perseverance USD
+    # (glb->USD, full PBR incl. gold-foil/metal). Falls back to the procedural
+    # rover if the asset is absent (keeps this script runnable anywhere).
     haz = None
     if bool(p["rover_enabled"]):
         rxy = p["rover_xy"]
         ground_z = _sample_height(Z, xs, ys, rxy[0], rxy[1])
-        haz = _author_rover(stage, "/World/Rover", rxy, ground_z,
-                            float(p["rover_heading_deg"]), rover_mats)
+        rover_usd = _resolve_asset(
+            "V3_ROVER_USD",
+            "/home/chaotic-curiosity/regolith/assets/rover/perseverance.usdc",
+            "assets/rover/perseverance.usdc")
+        rover_scale = float(os.environ.get("V3_ROVER_SCALE", "1.0"))
+        if rover_usd and os.path.isfile(rover_usd):
+            haz = _reference_rover_usd(stage, "/World/Rover", rover_usd, rxy, ground_z,
+                                       float(p["rover_heading_deg"]), scale=rover_scale)
+            print(">>> rover: referenced real-model USD %s (scale=%.2f)"
+                  % (rover_usd, rover_scale), flush=True)
+        else:
+            haz = _author_rover(stage, "/World/Rover", rxy, ground_z,
+                                float(p["rover_heading_deg"]), rover_mats)
+            print(">>> rover: USD '%s' not found -> procedural fallback" % rover_usd, flush=True)
 
     # --- Cameras ----------------------------------------------------------- #
     # Beauty cams must sit a fixed EYE HEIGHT above the LOCAL ground (the terrain has
@@ -914,10 +1116,12 @@ def build_lunar_stage_v3(seed: int, params: dict | None = None):
         _make_camera(stage, name, pos=(cxy[0], cxy[1], g + eye_h),
                      look_at=(look_xy[0], look_xy[1], rover_gz + look_h), hfov_deg=hfov)
 
-    # Beauty hero: elevated, off to the side, looking at the rover among boulders.
-    _cam_on_ground("/World/BeautyCam", (-9.0, -8.5), 2.5, (1.5, 3.0), 0.9, 42.0)
-    # Wide establishing: further back + elevated, rover small in the cratered landscape.
-    _cam_on_ground("/World/BeautyCam2", (-3.5, -15.5), 3.3, (0.5, 1.5), 0.8, 52.0)
+    # Beauty hero: sunlit front-right 3/4 (sun is from +X/-Y), rover the clear
+    # subject, boulders framing the sides without occluding, textured ground sweep.
+    _cam_on_ground("/World/BeautyCam", (9.0, -8.5), 2.7, (-0.6, 2.4), 1.15, 41.0)
+    # Closer dramatic 3/4: low + tight, rover large in frame with boulders flanking
+    # (the premium "closer rover shot").
+    _cam_on_ground("/World/BeautyCam2", (5.4, -5.4), 1.25, (-0.4, 1.5), 1.25, 49.0)
     # Hazard cam: on the rover mast, forward POV.
     if haz is not None:
         hp = haz["hazard_pos"]
@@ -988,11 +1192,20 @@ def main():
         except Exception:
             pass
     if pathtrace:
+        pt_spp = int(os.environ.get("V3_PT_TOTALSPP", "320"))
+        pt_bounces = int(os.environ.get("V3_PT_BOUNCES", "5"))
         settings.set("/rtx/rendermode", "PathTracing")
         settings.set("/rtx/pathtracing/spp", 1)
-        settings.set("/rtx/pathtracing/totalSpp", 256)
-        settings.set("/rtx/pathtracing/maxBounces", 4)
+        settings.set("/rtx/pathtracing/totalSpp", pt_spp)
+        settings.set("/rtx/pathtracing/maxBounces", pt_bounces)
         settings.set("/rtx/pathtracing/clampSpp", 0)
+        # Keep the OptiX denoiser OFF so it doesn't smear the fine regolith
+        # normal-map relief; 320 spp is clean enough for these stills.
+        try:
+            settings.set("/rtx/pathtracing/optixDenoiser/enabled", False)
+        except Exception:
+            pass
+        print(">>> pathtracing: totalSpp=%d maxBounces=%d" % (pt_spp, pt_bounces), flush=True)
 
     for _ in range(10):
         simulation_app.update()
