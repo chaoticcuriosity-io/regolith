@@ -1,19 +1,19 @@
 {
-  "experiment": "Domain-randomization ablation for lunar terrain semantic segmentation",
+  "experiment": "Domain-randomization ablation for lunar terrain semantic segmentation (v2 realistic rocks)",
   "model": "SegFormer-B0 (nvidia/mit-b0 ImageNet backbone, fresh 3-class decode head)",
-  "classes": ["regolith", "rock", "sky"],
+  "classes": [
+    "regolith",
+    "rock",
+    "sky"
+  ],
   "hazard_class": "rock",
   "primary_metric": "val rock-IoU on test_photoreal",
+  "dataset_version": "v2 (realistic rock geometry; build_lunar_stage.py rock-realism)",
   "common_config": {
     "loss": "class-weighted cross-entropy (ignore_index=255)",
-    "rock_class_weight_approx": 2.59,
     "val_split": "test_photoreal (unseen-domain synthetic, 300 frames)",
     "seed": 0,
-    "lr": 6e-05,
-    "batch": 8,
-    "early_stop_patience": 8,
-    "epochs_requested": 40,
-    "hardware": "NVIDIA DGX Spark (GB10 Grace-Blackwell), NGC pytorch:26.03-py3, transformers 5.12.1"
+    "hardware": "NVIDIA DGX Spark (GB10 Grace-Blackwell), NGC pytorch:26.03-py3"
   },
   "runs": {
     "nodr_750": {
@@ -21,57 +21,58 @@
       "train_split": "train_nodr",
       "train_frames": 750,
       "domain_randomization": false,
-      "rock_iou": 0.689,
-      "miou": 0.863,
-      "per_class_iou": {"regolith": 0.928, "rock": 0.689, "sky": 0.973},
-      "best_epoch": 9,
-      "epochs_run": 17,
-      "wall_time_s": 278
+      "rock_iou": 0.8025
     },
     "dr_750": {
       "label": "DR, size-matched (750 frames)",
       "train_split": "train_dr_750",
       "train_frames": 750,
       "domain_randomization": true,
-      "rock_iou": 0.788,
-      "miou": 0.903,
-      "per_class_iou": {"regolith": 0.947, "rock": 0.788, "sky": 0.974},
-      "best_epoch": 23,
-      "epochs_run": 31,
-      "wall_time_s": 507
+      "rock_iou": 0.8486
     },
     "dr_1500": {
       "label": "DR, full deployed set (1500 frames)",
       "train_split": "train_dr",
       "train_frames": 1500,
       "domain_randomization": true,
-      "rock_iou": 0.815,
-      "miou": 0.914,
-      "per_class_iou": {"regolith": 0.952, "rock": 0.815, "sky": 0.975},
-      "best_epoch": 27,
-      "epochs_run": 35,
-      "wall_time_s": 1024
+      "rock_iou": 0.8521,
+      "miou": 0.9269,
+      "per_class_iou": {
+        "regolith": 0.9556,
+        "rock": 0.8521,
+        "sky": 0.973
+      }
     }
   },
   "headline": {
     "size_matched_dr_gain": {
       "comparison": "dr_750 vs nodr_750 (dataset size held constant at 750)",
-      "rock_iou_from": 0.689,
-      "rock_iou_to": 0.788,
-      "absolute_gain": 0.099,
-      "relative_gain_pct": 14
+      "rock_iou_from": 0.8025,
+      "rock_iou_to": 0.8486,
+      "absolute_gain": 0.046,
+      "relative_gain_pct": 5.7
     },
     "extra_data_gain": {
       "comparison": "dr_1500 vs dr_750 (DR held constant, 750 -> 1500 frames)",
-      "rock_iou_from": 0.788,
-      "rock_iou_to": 0.815,
-      "absolute_gain": 0.027
+      "rock_iou_from": 0.8486,
+      "rock_iou_to": 0.8521,
+      "absolute_gain": 0.004
     }
   },
-  "verification": {
-    "note": "Global pixel-pooled rock-IoU/mIoU recomputed from best.pt over all 300 test_photoreal frames in a fresh inference pass reproduces the training-time numbers.",
-    "nodr_750_recomputed": {"rock_iou": 0.6885, "miou": 0.8629},
-    "dr_1500_recomputed": {"rock_iou": 0.8147, "miou": 0.9139}
+  "evolution_vs_v1": {
+    "note": "v2 realistic rocks lift absolute rock-IoU across the board (0.689->0.8025, 0.788->0.8486, 0.815->0.8521) but the size-matched DR gain shrinks: v1 +0.099 vs v2 +0.046, because realistic rock geometry already closes much of the domain gap that DR previously had to bridge.",
+    "v1_rock_iou": {
+      "nodr_750": 0.689,
+      "dr_750": 0.788,
+      "dr_1500": 0.815,
+      "size_matched_gain": 0.099
+    },
+    "v2_rock_iou": {
+      "nodr_750": 0.8025,
+      "dr_750": 0.8486,
+      "dr_1500": 0.8521,
+      "size_matched_gain": 0.046
+    }
   },
   "caveat": "test_photoreal is a synthetic unseen-domain split (held-out sim parameter ranges), not real lunar imagery. The true sim-to-real test is chapter 04."
 }
