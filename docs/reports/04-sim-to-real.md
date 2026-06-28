@@ -51,7 +51,7 @@ Then the hard rule: **there is no ground truth for these images.** Nobody hand-l
 
 ## The finding: it floods
 
-The deployed model paints almost everything rock. Averaged across the seven frames, `dr_1500` labels **~83% of pixels rock** and only **~4% regolith** (the rest sky). For comparison, a typical training frame is **1–8% rock**, and even the rockiest synthetic *test* frames top out near 30%. The model is predicting roughly ten to eighty times more rock than the data it was built to detect actually contains.
+The deployed model paints almost everything rock. Averaged across the seven frames, `dr_1500` labels **~83% of pixels rock** and only **~4% regolith** (the rest sky). For comparison, a typical training frame is **1–8% rock**, and even the rockiest synthetic `test_photoreal` frames top out near 80% (the measured max across 300 frames, mean ~11%). The model is predicting roughly ten to eighty times more rock than the data it was built to detect actually contains.
 
 Per frame, the predicted rock fraction from `dr_1500`:
 

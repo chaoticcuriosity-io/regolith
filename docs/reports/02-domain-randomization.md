@@ -137,7 +137,7 @@ Training a model on `train_nodr` and comparing it against one trained on `train_
 | Camera height | 1.5–2.7 m | 2.5–3.6 m |
 | Camera FOV | 52°–72° | 70°–85° |
 
-The rocks are also different: fewer (40–89 per frame), larger (far-field scale 0.5–2.2 m, near-field 1.8–4.0 m). Some test frames have near-field boulders that fill a substantial portion of the image — rock fraction can reach 53% in extreme cases, vs. a typical 1–8% in the training split. Rendered at 12 RTX subframes (vs. 3 for training) for the cleanest possible evaluation imagery. Seed 7777 — entirely independent of the training seed.
+The rocks are also different: fewer (40–89 per frame), larger (far-field scale 0.5–2.2 m, near-field 1.8–4.0 m). Some test frames have near-field boulders that fill a substantial portion of the image — rock fraction in `test_photoreal` can reach ~80% in extreme cases (measured across all 300 masks; mean ~11%), vs. a typical 1–8% in the training split. Rendered at 12 RTX subframes (vs. 3 for training) for the cleanest possible evaluation imagery. Seed 7777 — entirely independent of the training seed.
 
 A model that memorized training-domain appearance will degrade here. A domain-randomized model should hold up better. That contrast is what chapter 04 measures.
 

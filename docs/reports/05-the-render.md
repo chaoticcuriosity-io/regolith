@@ -141,7 +141,7 @@ ssh spark "docker rm -f isaac-render"
 
 # Stage B — overlay predictions + branding (PyTorch container with transformers)
 ssh spark "docker exec regolith-overlay bash -lc 'cd /workspace/regolith && python \
-  render/render_predictions.py overlay --checkpoint outputs/runs/dr_1500/best.pt \
+  render/render_predictions.py overlay --checkpoint outputs/runs_v2/dr_1500/best.pt \
   --rgb-dir /workspace/render_out/rgb --out /workspace/render_out/overlay \
   --display-gain 0.78 --skip-head 2'"
 

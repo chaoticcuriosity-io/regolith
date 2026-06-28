@@ -149,7 +149,7 @@ ssh spark "docker exec regolith-train bash -lc \
      --train-split /workspace/datasets/train_nodr \
      --val-split   /workspace/datasets/test_photoreal \
      --epochs 40 --lr 6e-5 --batch 8 --seed 0 --patience 8 \
-     --out /workspace/regolith/outputs/runs/nodr_750'"
+     --out /workspace/regolith/outputs/runs_v2/nodr_750'"
 
 # 2. DR, size-matched (750)
 ssh spark "docker exec regolith-train bash -lc \
@@ -157,7 +157,7 @@ ssh spark "docker exec regolith-train bash -lc \
      --train-split /workspace/datasets/train_dr_750 \
      --val-split   /workspace/datasets/test_photoreal \
      --epochs 40 --lr 6e-5 --batch 8 --seed 0 --patience 8 \
-     --out /workspace/regolith/outputs/runs/dr_750'"
+     --out /workspace/regolith/outputs/runs_v2/dr_750'"
 
 # 3. DR, full deployed set (1500)
 ssh spark "docker exec regolith-train bash -lc \
@@ -165,7 +165,7 @@ ssh spark "docker exec regolith-train bash -lc \
      --train-split /workspace/datasets/train_dr \
      --val-split   /workspace/datasets/test_photoreal \
      --epochs 40 --lr 6e-5 --batch 8 --seed 0 --patience 8 \
-     --out /workspace/regolith/outputs/runs/dr_1500'"
+     --out /workspace/regolith/outputs/runs_v2/dr_1500'"
 ```
 
 Each run writes `best.pt`, `metrics.jsonl` (per-epoch curves), and `summary.json` (final numbers) to its output dir. Checkpoints stay on the Spark — they are heavy binaries, excluded from git. The figures and the results table in `docs/reports/assets/` are the committed artifacts.

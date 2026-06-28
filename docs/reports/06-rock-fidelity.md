@@ -59,7 +59,7 @@ The actual headline is in chapter 04, and it points the other way.
 | Real Apollo frames: pixels called regolith | (substantial) | **~4%** ↓ |
 | DR vs no-DR on real | DR predicts *less* false rock | DR predicts **more** false rock |
 
-The realistic build scores higher on synthetic data and **floods real lunar regolith with false rock** — calling ~83% of every real Apollo frame "rock," up from ~52%. It barely finds any traversable ground at all (~4% regolith). And domain randomization, which reduced false rock on the crude build, now *increases* it on every one of the seven real frames. The synthetic arrow points up; every real arrow points the wrong way.
+The realistic build scores higher on synthetic data and **floods real lunar regolith with false rock** — calling ~83% of every real Apollo frame "rock," up from ~52% ([v1 per-frame data](assets/real-predictions-v1.json)). It barely finds any traversable ground at all (~4% regolith). And domain randomization, which reduced false rock on the crude build, now *increases* it on every one of the seven real frames. The synthetic arrow points up; every real arrow points the wrong way.
 
 The mechanism, in one line: **the texture that made the rocks look real — rough, gray, bumpy, matte basalt — is the same texture that defines real lunar regolith at photographic resolution.** The crude blobs were visually distinct from any plausible soil, so the model learned a boundary between "blob" and "ground." The realistic rocks erased that distinction: the model's most generalizable cue became "rough gray bumpy texture = rock," and on real film, regolith *is* rough gray bumpy texture. The boundary collapsed, and real soil flooded across it. Chapter 04 has the overlays — a wall of red — and the per-frame counts.
 

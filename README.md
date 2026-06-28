@@ -63,7 +63,7 @@ To run anything yourself, see the ops manual: [`docs/dgx-spark-regolith-manual.m
 |-----|-------:|:----------:|:--------:|:-----------:|
 | no-DR (frozen appearance) | 750 | 0.8025 | — | 0.689 |
 | **DR, size-matched** | **750** | **0.8486** | **+0.046** | 0.788 |
-| DR-1500 (full set) | 1,500 | **0.8521** | +0.050 | 0.815 |
+| DR-1500 (full set) | 1,500 | **0.8521** | +0.050 (vs no-DR, but size-matched +0.046 is the honest DR measure) | 0.815 |
 
 The size-matched comparison (`dr_750` vs `nodr_750`) isolates domain randomization from dataset size; the +0.046 gain is pure DR. (Note it *shrank* from the crude build's +0.099 — realistic geometry raised the no-DR floor to 0.8025, leaving DR less to fix. More data saturated: +0.004 from 750 → 1,500.)
 
