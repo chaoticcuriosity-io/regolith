@@ -22,13 +22,16 @@ a flat-ish look. v3 is a fidelity jump aimed at a beauty-plate look test (NO dat
   3. LIGHTING: harsh LOW sun (~12° elevation), long hard-edged shadows, pure black
      sky with crisp stars, high contrast — real airless-body lighting. A small,
      tasteful Earth low on the horizon (optional).
-  4. ROVER — PREMIUM real-model path: references an external rover USD (NASA
-     public-domain Mars 2020 Perseverance, glb->USD, full PBR incl. gold-foil /
-     metal / treaded wheels / rocker-bogie / mast), stood on the surface and faced
-     down-traverse. Falls back to a procedural rover (chassis + 6 wheels + struts +
-     mast + RTG + antenna) if the asset is absent, so the script runs anywhere.
-     The biggest in-frame BOULDERS are fractured/angular dark basalt (rock material
-     hue is locked grey — no pink tint).
+  4. ROVER — PREMIUM real-model path: references an external rover USD (NASA VIPER
+     — Volatiles Investigating Polar Exploration Rover, the lunar rover — full PBR:
+     gold MLI body, 4 legged wheels, the signature VERTICAL side solar panels, a
+     tall front NavCam mast + headlights, and the TRIDENT drill), stood on the
+     surface and faced down-traverse. (No CC0/public-domain VIPER mesh exists for
+     download, so the asset is authored from primitives in Blender to VIPER's
+     documented configuration — see scene/viper_build.py; same glb/Blender->USD
+     route.) Falls back to a procedural rover if the asset is absent, so the script
+     runs anywhere. The biggest in-frame BOULDERS are fractured/angular dark basalt
+     (rock material hue is locked grey — no pink tint).
 
 Cameras authored:
   /World/BeautyCam   — third-person hero: rover on the cratered surface among boulders.
@@ -659,14 +662,15 @@ def _stamp_crater(Z, xs, ys, cx, cy, R, depth, rim):
 # Real-model rover (referenced external USD) — PREMIUM path.
 # =========================================================================== #
 def _reference_rover_usd(stage, root_path, usd_path, base_xy, ground_z, heading_deg,
-                         scale=1.0, wheel_local_z=-1.0, sink=0.09):
-    """Reference an external rover USD (NASA public-domain Mars 2020 Perseverance,
-    converted glb->USD) and stand it on the surface.
+                         scale=1.0, wheel_local_z=0.0, sink=0.09):
+    """Reference an external rover USD (NASA VIPER lunar rover, Blender->USD) and
+    stand it on the surface.
 
-    The asset's FRONT is -Y in its own frame, so we add a 180 deg yaw to face
-    scene-forward (+Y) before the scene heading. Wheels rest at local z=wheel_local_z
-    (the asset's bbox floor); we lift them onto ``ground_z`` and sink a few cm for
-    contact. Returns the hazard-cam mount (world pos + forward dir)."""
+    The asset's FRONT is -Y in its own frame (VIPER's NavCam mast + TRIDENT drill at
+    -Y), so we add a 180 deg yaw to face scene-forward (+Y) before the scene heading.
+    Wheels rest at local z=wheel_local_z (the asset's wheel-contact floor: 0.0 for
+    the VIPER build; the legacy Perseverance asset used -1.0); we lift them onto
+    ``ground_z`` and sink a few cm for contact. Returns the hazard-cam mount."""
     from pxr import UsdGeom, Gf
     xform = UsdGeom.Xform.Define(stage, root_path)
     xform.GetPrim().GetReferences().AddReference(usd_path)
@@ -934,31 +938,34 @@ def build_lunar_stage_v3(seed: int, params: dict | None = None):
     _bind_material(regolith_prim, regolith_mat)
     _add_semantics(regolith_prim, "regolith")
 
-    # --- Rock prototype pool (for the PointInstancer scatter) -------------- #
+    # --- Rock prototype pool + PER-MESH power-law scatter ------------------ #
+    # The scatter is authored as INDIVIDUAL Mesh prims (each tagged "rock"), NOT a
+    # USD PointInstancer. A PointInstancer renders identically but its semantic
+    # label — whether placed on the instancer prim OR on its child prototype meshes
+    # — does NOT propagate to the point-instanced pixels in Isaac Sim 6.0 semantic
+    # segmentation (verified both ways: every scattered pebble came back UNLABELLED,
+    # a real hole for the upcoming dataset). Per-mesh scatter uses the SAME proven
+    # path as the hero boulders (individually-tagged meshes -> reliably class
+    # "rock"). RNG draw order is preserved exactly, so positions/scales/orientations
+    # are bit-identical to the instancer version — the look is unchanged.
     UsdGeom.Xform.Define(stage, "/World/Rocks")
-    instancer = UsdGeom.PointInstancer.Define(stage, "/World/Rocks/Scatter")
-    proto_paths = []
+    UsdGeom.Scope.Define(stage, "/World/Rocks/Scatter")
     disp_amp = float(p["rock_displacement_amp"])
     n_low = 10   # subdiv-2 protos (pebbles/small)
     n_mid = 6    # subdiv-3 protos (mid rocks)
     proto_rng = np.random.RandomState((int(seed) * 7919 + 17) & 0x7FFFFFFF)
+    protos = []   # reusable geometry pool: (points, face_counts, face_indices, normals, material)
     for k in range(n_low + n_mid):
         subdiv = 2 if k < n_low else 3
         bp, bf = _icosphere(subdiv)
         dp = _displace_rock(bp, proto_rng, amp=disp_amp)
         nn = _vertex_normals(dp, bf)
-        ppath = "/World/Rocks/Scatter/Proto_%02d" % k
-        prim = _author_mesh(stage, ppath, dp, np.full(len(bf), 3, dtype=np.int32), bf.ravel(), normals=nn)
-        _bind_material(prim, rock_mats[k % len(rock_mats)])
-        proto_paths.append(ppath)
-    instancer.CreatePrototypesRel().SetTargets(proto_paths)
+        protos.append((dp, np.full(len(bf), 3, dtype=np.int32), bf.ravel(), nn,
+                       rock_mats[k % len(rock_mats)]))
 
-    # --- Power-law scatter (pebbles -> small -> mid) ----------------------- #
+    # --- Power-law scatter (pebbles -> small -> mid), each an own tagged Mesh -- #
     embed = float(p["embedding_depth_frac"])
-    positions = []
-    scales = []
-    orients = []
-    proto_idx = []
+    scatter_n = [0]
 
     def _scatter(n, s_lo, s_hi, xr, yr, proto_lo, proto_hi):
         for _ in range(int(n)):
@@ -970,26 +977,24 @@ def build_lunar_stage_v3(seed: int, params: dict | None = None):
             sz = base * rng.uniform(0.55, 0.9)
             g = _sample_height(Z, xs, ys, px, py)
             cz = g + sz * (1.0 - embed)
-            positions.append(Gf.Vec3f(float(px), float(py), float(cz)))
-            scales.append(Gf.Vec3f(float(sx), float(sy), float(sz)))
             rot = (Gf.Rotation(Gf.Vec3d(1, 0, 0), rng.uniform(0, 360))
                    * Gf.Rotation(Gf.Vec3d(0, 1, 0), rng.uniform(0, 360))
                    * Gf.Rotation(Gf.Vec3d(0, 0, 1), rng.uniform(0, 360)))
-            q = rot.GetQuat()
-            im = q.GetImaginary()
-            orients.append(Gf.Quath(float(q.GetReal()), float(im[0]), float(im[1]), float(im[2])))
-            proto_idx.append(int(rng.randint(proto_lo, proto_hi)))
+            pk = int(rng.randint(proto_lo, proto_hi))
+            pts, fc, fi, nn, mat = protos[pk]
+            idx = scatter_n[0]; scatter_n[0] += 1
+            prim = _author_mesh(stage, "/World/Rocks/Scatter/rock_%05d" % idx,
+                                pts, fc, fi, normals=nn)
+            m_scale = Gf.Matrix4d().SetScale(Gf.Vec3d(float(sx), float(sy), float(sz)))
+            m_rot = Gf.Matrix4d().SetRotate(rot)
+            _set_transform(prim, m_scale * m_rot * _trans(float(px), float(py), float(cz)))
+            _bind_material(prim, mat)
+            _add_semantics(prim, "rock")
 
     _scatter(p["n_pebbles"], 0.04, 0.18, 36.0, (-12.0, 82.0), 0, n_low)
     _scatter(p["n_small"], 0.18, 0.5, 55.0, (-30.0, 135.0), 0, n_low)
     _scatter(p["n_mid"], 0.5, 1.4, 72.0, (-40.0, 175.0), n_low, n_low + n_mid)
-
-    from pxr import Vt
-    instancer.CreatePositionsAttr(Vt.Vec3fArray(positions))
-    instancer.CreateScalesAttr(Vt.Vec3fArray(scales))
-    instancer.CreateOrientationsAttr(Vt.QuathArray(orients))
-    instancer.CreateProtoIndicesAttr(Vt.IntArray([int(i) for i in proto_idx]))
-    _add_semantics(instancer.GetPrim(), "rock")
+    print(">>> scatter: authored %d per-mesh rocks (each semantic=rock)" % scatter_n[0], flush=True)
 
     # --- Hand-placed hero boulders (the FEW large in-frame rocks) ---------- #
     UsdGeom.Xform.Define(stage, "/World/HeroRocks")
@@ -1083,21 +1088,25 @@ def build_lunar_stage_v3(seed: int, params: dict | None = None):
         _add_semantics(earth.GetPrim(), "sky")
 
     # --- Rover ------------------------------------------------------------- #
-    # PREMIUM path: reference the NASA public-domain Mars 2020 Perseverance USD
-    # (glb->USD, full PBR incl. gold-foil/metal). Falls back to the procedural
-    # rover if the asset is absent (keeps this script runnable anywhere).
+    # PREMIUM path: reference the NASA VIPER lunar-rover USD (Blender->USD, full PBR:
+    # gold MLI body, vertical side solar panels, NavCam mast, TRIDENT drill). Falls
+    # back to the procedural rover if the asset is absent (runnable anywhere).
     haz = None
     if bool(p["rover_enabled"]):
         rxy = p["rover_xy"]
         ground_z = _sample_height(Z, xs, ys, rxy[0], rxy[1])
         rover_usd = _resolve_asset(
             "V3_ROVER_USD",
-            "/home/chaotic-curiosity/regolith/assets/rover/perseverance.usdc",
-            "assets/rover/perseverance.usdc")
+            "/home/chaotic-curiosity/regolith/assets/rover/viper.usdc",
+            "assets/rover/viper.usdc")
         rover_scale = float(os.environ.get("V3_ROVER_SCALE", "1.0"))
+        # Wheel-contact floor of the referenced asset in its own frame (VIPER build
+        # = 0.0; legacy Perseverance asset = -1.0). Override via V3_ROVER_FLOOR_Z.
+        rover_floor_z = float(os.environ.get("V3_ROVER_FLOOR_Z", "0.0"))
         if rover_usd and os.path.isfile(rover_usd):
             haz = _reference_rover_usd(stage, "/World/Rover", rover_usd, rxy, ground_z,
-                                       float(p["rover_heading_deg"]), scale=rover_scale)
+                                       float(p["rover_heading_deg"]), scale=rover_scale,
+                                       wheel_local_z=rover_floor_z)
             print(">>> rover: referenced real-model USD %s (scale=%.2f)"
                   % (rover_usd, rover_scale), flush=True)
         else:
