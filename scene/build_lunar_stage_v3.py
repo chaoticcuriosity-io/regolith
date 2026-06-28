@@ -624,6 +624,17 @@ DEFAULT_PARAMS = {
     "rover_enabled": True,
     "rover_xy": (0.0, 0.0),
     "rover_heading_deg": 0.0,        # 0 = faces +Y
+    # Surface-only dataset hazard cam (used ONLY when rover_enabled is False — the SDG
+    # path). Eye height is GROUND-RELATIVE (the terrain has ~9 m hills, so an absolute-Z
+    # camera can bury underground -> black frame). Looks down the +Y traverse, where the
+    # power-law scatter + hero boulders live; yaw/pitch/fov are domain-randomizable per
+    # frame. Small yaw + a rear/side sun azimuth keep the sky-dome's sun-hole out of frame.
+    "cam_xy": (0.0, 0.0),
+    "cam_height_m": 2.1,
+    "cam_pitch_deg": -7.0,           # negative = look down
+    "cam_fov_deg": 60.0,
+    "cam_yaw_deg": 0.0,              # 0 = look +Y
+    "cam_look_dist": 30.0,
 }
 
 _COUNT_RNG_XOR = 0xA11CE
@@ -1139,8 +1150,23 @@ def build_lunar_stage_v3(seed: int, params: dict | None = None):
                      pos=hp, look_at=(hp[0] + hf[0] * 30.0, hp[1] + hf[1] * 30.0, hp[2] + hf[2] * 30.0),
                      hfov_deg=58.0)
     else:
-        _make_camera(stage, "/World/HazardCam", pos=(0.0, 1.5, 1.9),
-                     look_at=(0.0, 40.0, -2.0), hfov_deg=58.0)
+        # Surface-only dataset cam (no rover): ground-relative eye height, looking
+        # down the +Y traverse with DR-able yaw / pitch / fov (the SDG hazard plate).
+        cxy = p["cam_xy"]
+        gcam = _sample_height(Z, xs, ys, cxy[0], cxy[1])
+        eye = gcam + float(p["cam_height_m"])
+        yaw = math.radians(float(p["cam_yaw_deg"]))
+        pit = math.radians(float(p["cam_pitch_deg"]))
+        cphi = math.cos(pit)
+        # forward in XY = +Y rotated about Z by yaw; pitch tilts it down (-Z).
+        fwd = (cphi * math.sin(yaw), cphi * math.cos(yaw), math.sin(pit))
+        dist = float(p["cam_look_dist"])
+        _make_camera(stage, "/World/HazardCam",
+                     pos=(cxy[0], cxy[1], eye),
+                     look_at=(cxy[0] + fwd[0] * dist,
+                              cxy[1] + fwd[1] * dist,
+                              eye + fwd[2] * dist),
+                     hfov_deg=float(p["cam_fov_deg"]))
 
     print(">>> build_lunar_stage_v3: seed=%d  ground=%dx%d verts  craters(b/m/s)=%d/%d/%d"
           "  scatter(peb/sm/mid)=%d/%d/%d  hero=%d  sun(el=%.1f,az=%.1f,I=%.0f)  reg_albedo=%.3f"

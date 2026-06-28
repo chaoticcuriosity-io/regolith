@@ -1,0 +1,73 @@
+# train_dr.yaml (v3) — TRAINING split WITH full domain randomization.
+#
+# v3 PREMIUM scene (scene/build_lunar_stage_v3.py): cratered regolith ground + tiling
+# normal map, power-law PER-MESH rocks (each tagged "rock" -> correct semantics), pure
+# black starfield. SURFACE-ONLY: rover_enabled is FALSE (the rover is cinematic-only).
+#
+# Consumed by replicator/generate_dataset_v3.py via randomizers_v3.sample_params_v3:
+# each frame draws a fresh value for every `ranges` knob; `const` + `passthrough_ranges`
+# apply every frame. Keys are literal build_lunar_stage_v3 params.
+#
+# Sun intensity is calibrated for v3's auto-exposure-OFF pipeline (~3.6k = mid-grey lit
+# regolith). Sun azimuth stays in the rear/side hemisphere (camera looks +Y) so the
+# sky-dome's sun-hole never enters frame.
+
+mode: dr
+seed: 42
+res: 512
+rt_subframes: 4          # speed over polish for the training bulk
+
+int_keys:
+  - n_craters_big
+  - n_craters_med
+  - n_craters_small
+  - n_pebbles
+  - n_small
+  - n_mid
+  - star_count
+
+const:
+  rover_enabled: false   # SURFACE-ONLY dataset (no rover)
+  earth_enabled: true
+  cam_xy: [0.0, 0.0]
+  cam_look_dist: 30.0
+
+passthrough_ranges:
+  rock_albedo_range: [0.045, 0.100]      # dark basalt, just below regolith
+  rock_roughness_range: [0.85, 0.97]
+
+ranges:
+  # --- Sun (domain) ---
+  sun_elevation_deg: [9, 26]             # low harsh airless-body sun -> long shadows
+  sun_azimuth_deg: [100, 240]            # rear/side hemisphere (keeps sun-hole out of frame)
+  sun_intensity: [2600, 4400]            # auto-exposure OFF -> drives lit-regolith brightness
+
+  # --- Regolith material (domain) ---
+  regolith_albedo: [0.09, 0.17]          # dark lunar basalt
+  regolith_roughness: [0.90, 0.99]
+
+  # --- Terrain (domain / geometry) ---
+  hill_amp: [6.0, 12.0]                  # rolling hills (ragged horizon)
+  undulation_amp: [1.6, 3.2]
+  roughness_amp: [0.50, 0.95]
+
+  # --- Crater field (geometry; builder adds its own +/- jitter) ---
+  n_craters_big: [5, 9]
+  n_craters_med: [34, 50]
+  n_craters_small: [200, 280]
+
+  # --- Rocks: power-law per-mesh scatter (geometry) ---
+  n_pebbles: [900, 1500]
+  n_small: [320, 520]
+  n_mid: [70, 120]
+  embedding_depth_frac: [0.26, 0.42]
+  rock_displacement_amp: [0.30, 0.40]
+
+  # --- Camera (domain) ---
+  cam_height_m: [1.6, 2.8]
+  cam_pitch_deg: [-12.0, -3.0]           # negative = look down
+  cam_fov_deg: [54, 70]
+  cam_yaw_deg: [-12.0, 12.0]
+
+  # --- Sky ---
+  star_count: [120, 200]

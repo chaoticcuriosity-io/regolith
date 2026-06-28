@@ -1,0 +1,67 @@
+# test_photoreal.yaml (v3) — held-out SYNTHETIC TEST split (the domain-gap test).
+#
+# NOT drawn from the training distribution: every domain knob is shifted into a range
+# the training splits never saw (higher sun, brighter/smoother regolith, rougher terrain,
+# a higher + wider + more downward camera) AND the rocks use deliberately different
+# parameters (fewer, larger). A model that memorized the training look degrades here; a
+# domain-randomized model should hold up. Rendered at higher quality (more RTX subframes).
+#
+# mode: dr (still randomized — over UNSEEN ranges). SURFACE-ONLY (rover off).
+
+mode: dr
+seed: 7777               # disjoint from the training seed -> independent draws
+res: 512
+rt_subframes: 8          # photoreal quality for the evaluation set
+
+int_keys:
+  - n_craters_big
+  - n_craters_med
+  - n_craters_small
+  - n_pebbles
+  - n_small
+  - n_mid
+  - star_count
+
+const:
+  rover_enabled: false
+  earth_enabled: true
+  cam_xy: [0.0, 0.0]
+  cam_look_dist: 30.0
+
+passthrough_ranges:
+  rock_albedo_range: [0.045, 0.100]
+  rock_roughness_range: [0.85, 0.97]
+
+ranges:
+  # --- Sun (UNSEEN: train was el 9-26 / I 2.6k-4.4k) ---
+  sun_elevation_deg: [28, 46]            # higher sun than any training frame
+  sun_azimuth_deg: [100, 240]            # rear/side hemisphere (sun-hole out of frame)
+  sun_intensity: [1800, 2800]            # lower I offsets higher elevation -> UNSEEN combo
+
+  # --- Regolith (UNSEEN: train was albedo 0.09-0.17 / rough 0.90-0.99) ---
+  regolith_albedo: [0.17, 0.26]          # brighter highland regolith
+  regolith_roughness: [0.78, 0.90]       # smoother than training
+
+  # --- Terrain (UNSEEN: rougher relief) ---
+  hill_amp: [11.0, 16.0]
+  undulation_amp: [3.0, 4.5]
+  roughness_amp: [0.90, 1.30]
+  n_craters_big: [8, 12]
+  n_craters_med: [48, 64]
+  n_craters_small: [270, 340]
+
+  # --- Rocks (DIFFERENT: fewer, larger) ---
+  n_pebbles: [500, 900]
+  n_small: [200, 360]
+  n_mid: [40, 80]
+  embedding_depth_frac: [0.34, 0.52]
+  rock_displacement_amp: [0.34, 0.44]
+
+  # --- Camera (UNSEEN: higher, steeper, wider) ---
+  cam_height_m: [2.6, 3.6]
+  cam_pitch_deg: [-16.0, -8.0]
+  cam_fov_deg: [70, 84]
+  cam_yaw_deg: [-15.0, 15.0]
+
+  # --- Sky ---
+  star_count: [100, 180]

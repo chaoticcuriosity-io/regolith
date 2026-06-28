@@ -1,0 +1,68 @@
+# train_nodr.yaml (v3) — TRAINING split WITHOUT domain randomization (ablation control).
+#
+# The DOMAIN (sun, regolith albedo/roughness, terrain amplitudes, camera, embedding,
+# star count) is FROZEN to one nominal v3 appearance. Scene CONTENT still varies per
+# frame: the per-frame seed re-draws every rock/crater placement + terrain noise, so each
+# frame has a different layout — only the look is fixed. train_dr vs train_nodr (both
+# evaluated on test_photoreal) is the domain-randomization ablation.
+#
+# mode: nodr -> sample_params_v3 returns these fixed `nominal` values (no draws from rng).
+# `passthrough_ranges` (rock material distribution) match train_dr so content matches.
+
+mode: nodr
+seed: 42
+res: 512
+rt_subframes: 4
+
+int_keys:
+  - n_craters_big
+  - n_craters_med
+  - n_craters_small
+  - n_pebbles
+  - n_small
+  - n_mid
+  - star_count
+
+const:
+  rover_enabled: false
+  earth_enabled: true
+  cam_xy: [0.0, 0.0]
+  cam_look_dist: 30.0
+
+passthrough_ranges:
+  rock_albedo_range: [0.045, 0.100]
+  rock_roughness_range: [0.85, 0.97]
+
+nominal:
+  # --- Sun (FROZEN) ---
+  sun_elevation_deg: 15
+  sun_azimuth_deg: 135
+  sun_intensity: 3500
+
+  # --- Regolith (FROZEN) ---
+  regolith_albedo: 0.12
+  regolith_roughness: 0.96
+
+  # --- Terrain (FROZEN amplitudes; crater/rock placement still varies per seed) ---
+  hill_amp: 9.0
+  undulation_amp: 2.4
+  roughness_amp: 0.72
+  n_craters_big: 7
+  n_craters_med: 42
+  n_craters_small: 240
+
+  # --- Rocks (frozen COUNTS; per-rock placement varies via seed) ---
+  n_pebbles: 1200
+  n_small: 420
+  n_mid: 95
+  embedding_depth_frac: 0.34
+  rock_displacement_amp: 0.34
+
+  # --- Camera (FROZEN) ---
+  cam_height_m: 2.1
+  cam_pitch_deg: -7.0
+  cam_fov_deg: 60
+  cam_yaw_deg: 0.0
+
+  # --- Sky (FROZEN) ---
+  star_count: 150
