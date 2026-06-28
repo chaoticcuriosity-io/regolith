@@ -1,15 +1,15 @@
 {
-  "checkpoint": "/workspace/regolith/outputs/runs/dr_1500/best.pt",
+  "checkpoint": "outputs/runs_v2/dr_1500/best.pt",
   "model_name": "segformer_b0",
   "split": "test_photoreal",
   "n_frames": 300,
-  "rock_iou_global": 0.8146655065664089,
-  "miou_global": 0.9139267109689225,
+  "rock_iou_global": 0.8520471538962692,
+  "miou_global": 0.9268648508129763,
   "class_iou_global": {
-    "regolith": 0.952098572458344,
-    "rock": 0.8146655065664089,
-    "sky": 0.975016053882015
+    "regolith": 0.9555759054522059,
+    "rock": 0.8520471538962692,
+    "sky": 0.9729714930904542
   },
-  "rock_iou_mean_per_frame": 0.7946861870155888,
-  "stored_val_rock_iou": 0.8151746050916501
+  "rock_iou_mean_per_frame": 0.8054800722317372,
+  "stored_val_rock_iou": 0.8521096771521322
 }

@@ -4,9 +4,9 @@
 
 ---
 
-Chapter 02 produced three labeled datasets: a 1,500-frame **domain-randomized** training set, a 750-frame no-DR control where only the *appearance* is frozen, and a 300-frame unseen-domain test set (`test_photoreal`). This chapter turns those pixels into a model — and then runs the experiment the whole series has been building toward: **does domain randomization actually help, when you hold everything else equal?**
+Chapter 02 produced three labeled datasets — rendered on the realistic basalt rocks of chapter 01: a 1,500-frame **domain-randomized** training set, a 750-frame no-DR control where only the *appearance* is frozen, and a 300-frame unseen-domain test set (`test_photoreal`). This chapter turns those pixels into a model — and then runs the experiment the whole series has been building toward: **does domain randomization actually help, when you hold everything else equal?**
 
-The answer, measured: **+0.099 rock-IoU** at matched dataset size. This chapter explains what that number means, how it was earned, and — just as importantly — what it does *not* yet prove.
+The answer, measured: **+0.046 rock-IoU** at matched dataset size. That is a real gain — but it is *smaller* than the +0.099 the cruder first-build rocks produced, and the reason why is the seed of this whole series' punchline. The realistic rocks lifted every score: the no-DR baseline jumped from 0.689 to **0.8025**, so there was simply less gap left for domain randomization to close. This chapter explains what these numbers mean, how they were earned, and — just as importantly — why a higher synthetic score is about to mislead us.
 
 ---
 
@@ -85,62 +85,48 @@ Comparing 1,500-vs-750 would have inflated the apparent DR benefit by smuggling 
 
 All three runs, best validation checkpoint on `test_photoreal`:
 
-| Run | Frames | DR? | rock-IoU | mIoU | regolith IoU | rock IoU | sky IoU | best epoch | wall time |
-|-----|-------:|:---:|:--------:|:----:|:-----------:|:--------:|:-------:|:----------:|:---------:|
-| `nodr_750` | 750 | no | **0.689** | 0.863 | 0.928 | 0.689 | 0.973 | 9 | 278 s |
-| `dr_750` | 750 | **yes** | **0.788** | 0.903 | 0.947 | 0.788 | 0.974 | 23 | 507 s |
-| `dr_1500` | 1,500 | yes | **0.815** | 0.914 | 0.952 | 0.815 | 0.975 | 27 | 1,024 s |
+| Run | Frames | DR? | rock-IoU | best epoch |
+|-----|-------:|:---:|:--------:|:----------:|
+| `nodr_750` | 750 | no | **0.8025** | 18 |
+| `dr_750` | 750 | **yes** | **0.8486** | 19 |
+| `dr_1500` | 1,500 | yes | **0.8521** | 13 |
+
+For the deployed `dr_1500` checkpoint, the full per-class breakdown is **regolith 0.9556 / rock 0.8521 / sky 0.9730**, mIoU **0.9269**.
 
 Read the two effects straight off the table:
 
-- **Domain randomization, size-matched:** rock-IoU **0.689 → 0.788 = +0.099 absolute (+14% relative)**, with dataset size held fixed at 750. Pure DR.
-- **More data, DR held fixed:** rock-IoU **0.788 → 0.815 = +0.027** going from 750 to 1,500 frames. Real, but roughly a third the size of the DR effect.
+- **Domain randomization, size-matched:** rock-IoU **0.8025 → 0.8486 = +0.046 absolute (+5.7% relative)**, with dataset size held fixed at 750. Pure DR.
+- **More data, DR held fixed:** rock-IoU **0.8486 → 0.8521 = +0.004** going from 750 to 1,500 frames. Effectively flat — the curve has **saturated**. Doubling the data bought almost nothing.
 
-Notice *where* the gains land. Regolith IoU (0.928 → 0.952) and sky IoU (0.973 → 0.975) were already excellent and barely move — those classes are easy. Almost the entire improvement concentrates in **rock**, the one class that matters for not destroying a wheel. Domain randomization buys you precisely the capability you were trying to buy.
+Two things changed from the cruder first build, and both matter. First, every number is higher: the realistic basalt geometry is simply easier to learn and to generalize from, lifting the no-DR baseline from 0.689 all the way to **0.8025**. Second — and this is the consequence — the **DR gain shrank**, from +0.099 to **+0.046**, and the more-data gain all but vanished (+0.004). When the floor rises that far, there is less room left above it for either lever to add. Regolith (0.9556) and sky (0.9730) are at ceiling; what little headroom remains is in **rock**, the one class that matters for not destroying a wheel.
 
-![Bar chart of rock-IoU across the three runs: no-DR 750 at 0.689, DR 750 at 0.788, DR 1500 at 0.815, with the +0.099 size-matched gain annotated between the first two bars and the +0.027 more-data gain on the third](assets/ablation-rockiou.png)
+![Bar chart of rock-IoU across the three runs on the realistic rocks: no-DR 750 at 0.8025, DR 750 at 0.8486, DR 1500 at 0.8521, with the +0.046 size-matched gain annotated between the first two bars and the +0.004 more-data gain on the third](assets/ablation-rockiou.png)
 
-The full numeric table, including the independent verification pass, is committed alongside the figures at [`assets/ablation-results.json`](assets/ablation-results.json). Those global IoU numbers were re-derived in a fresh inference pass over all 300 test frames straight from the saved checkpoints — `nodr_750` recomputed to rock-IoU 0.6885 / mIoU 0.8629, `dr_1500` to 0.8147 / 0.9139 — matching the training-time numbers to the third decimal. The overlays below come from that same faithful pass, so what you see is genuinely what the deployed weights predict.
-
----
-
-## What the overlays show
-
-Aggregate IoU is a single number; it hides *how* a model fails. To see the difference, we ran the no-DR-750 and DR-1500 checkpoints on four `test_photoreal` frames spanning the rock-coverage range — sparse far-field scatter to a boulder-dominated foreground — and laid them side by side: **RGB input | ground truth | no-DR prediction | DR-1500 prediction**, with the project's fixed palette (regolith gray, **rock red**, sky blue).
-
-A sparse field (2.7% rock). The no-DR model catches the big near-field boulder but under-segments the small rocks strung along the horizon; DR fills more of them in. Rock recall rises 0.93 → 0.98.
-
-![Frame 00029, 2.7% rock coverage: four-panel RGB / ground-truth / no-DR / DR-1500 overlay; DR catches more of the small horizon rocks](assets/ablation-00029.png)
-
-A medium scatter (6.1% rock). The most revealing failure on this frame: the no-DR model punches a hole of **sky** (blue) straight through a bright near-field boulder at lower right — it mistakes a sunlit rock face for background. DR labels the whole boulder correctly as rock. This is exactly the appearance-overfitting DR is meant to cure: the no-DR model only ever saw rocks under one lighting, so a brightly lit rock confuses it.
-
-![Frame 00118, 6.1% rock coverage: four-panel overlay; the no-DR prediction misclassifies part of a bright boulder as sky, which DR labels correctly as rock](assets/ablation-00118.png)
-
-A denser mid-field (12.1% rock). The no-DR model leaves gaps where ground truth has rock; DR closes them, lifting rock recall 0.90 → 1.00 on this frame.
-
-![Frame 00071, 12.1% rock coverage: four-panel overlay; DR fills in mid-field rocks the no-DR model misses](assets/ablation-00071.png)
-
-A boulder-dominated foreground (30.4% rock). The no-DR prediction is fragmented — it carves a regolith-colored hole into the interior of the large central boulder and breaks its edges into noise. DR renders it as one solid rock mass that tracks ground truth closely. Rock recall 0.81 → 0.95.
-
-![Frame 00154, 30.4% rock coverage: four-panel overlay; the no-DR prediction fragments a large boulder and hollows its centre, while DR segments it as one solid mass](assets/ablation-00154.png)
-
-**An honest note on frame selection.** These four were chosen to be *legible* — frames where the difference is large enough to see at a glance — and they span the rock-coverage range rather than clustering at one density. Their per-frame DR gains (+0.10 to +0.14 rock-IoU) sit somewhat above the **+0.0765 mean per-frame gain** across all 300 test frames (all 300 frames contain rock in ground truth — no NaN exclusions), precisely because the most visible cases are above-average ones. They are not the extreme outliers either (a handful of frames swing +0.3 to +0.5). And the effect is not universal: DR beats no-DR on **267 of 300** frames, ties or trails on the other 33. Per-frame results are committed to [`assets/ablation-perframe.json`](assets/ablation-perframe.json). The overlays illustrate the direction and character of the improvement; the table and bar chart carry the rigorous magnitude.
+The full numeric table — including the v1-vs-v2 comparison and the independent verification pass — is committed alongside the figures at [`assets/ablation-results.json`](assets/ablation-results.json). The `dr_1500` global IoU was re-derived in a fresh inference pass over all 300 test frames straight from the saved checkpoint — rock-IoU **0.8520**, mIoU **0.9269** — matching the training-time number (0.8521) to three decimals, so the inference path is faithful.
 
 ---
 
-## Why no-DR loses: it memorizes the look
+## Why the DR gain shrank: the floor came up
 
-The training curves expose the mechanism. The no-DR model reached its best validation rock-IoU at **epoch 9** — where its **training** rock-IoU was **0.830** but its **validation** rock-IoU was only **0.689**, a 0.141 generalization gap. Its validation loss was already *climbing* (0.368 → 0.402) while its training loss collapsed toward 0.04. That is the textbook signature of **overfitting**: the model is memorizing the one frozen appearance of its training set, not learning rock-ness. Early stopping halted it at epoch 17.
+The mechanism is the same one domain randomization always fights — **overfitting to a frozen appearance** — but the realistic rocks changed the size of the prize.
 
-The domain-randomized model never gets that chance. Its **first epoch** already scored validation rock-IoU **0.712** — *above the no-DR model's best-ever 0.689* — and it kept genuinely improving until epoch 27, because randomized appearance gives it nothing to memorize. The signal it can fit is the part that generalizes: geometry, shadow, the tonal relationship between rock and ground. The cost is wall-clock — DR runs train longer before they stop improving (1,024 s vs 278 s) — which is a cheap price for the capability.
+In the cruder first build, the no-DR model had a soft target to memorize: smooth, low-poly rocks under one fixed lighting were easy to overfit and brittle to generalize, so the no-DR baseline languished at 0.689 and DR's anti-memorization pressure bought a full **+0.099**. The realistic basalt rocks are a richer, more varied signal in their *own* geometry — every boulder is a distinct eroded shape — so even a no-DR model trained on them generalizes much better to the unseen-domain test set (0.689 → **0.8025**). Realistic geometry, it turns out, does part of the job domain randomization used to do alone.
+
+That is why the size-matched DR gain fell to **+0.046**: there was less brittleness left to fix. And it is why more data saturated almost immediately (**+0.004** from 750 → 1,500) — once the model has learned generalizable rock-ness from realistic shapes, additional frames of the same kind add little. Both observations point the same way: **fidelity and domain randomization are partly redundant levers.** Raise one and the other has less to contribute.
+
+Read at face value, this is good news, and the table says so: realistic rocks plus DR give the highest synthetic rock-IoU this project has produced, **0.8521**. If the story ended at the synthetic benchmark, "we made the rocks photoreal and the number went up" would be the headline.
+
+The story does not end at the synthetic benchmark.
 
 ---
 
 ## The caveat that matters: this is still synthetic
 
-Read the headline precisely. The +0.099 gain is measured on **`test_photoreal`** — a synthetic, held-out, **unseen-domain** split. Chapter 02 built it specifically to sit *outside* the training distribution: brighter sun (42°–70° elevation vs 5°–40°), higher albedo, rougher terrain, wider lenses, bigger and fewer rocks. So this is a real and demanding generalization test — the model is predicting on lighting, materials, and geometry it never trained on, and DR's advantage there is exactly the point.
+Read the headline precisely. The +0.046 gain — and the 0.8521 ceiling it sits under — is measured on **`test_photoreal`**, a synthetic, held-out, **unseen-domain** split. Chapter 02 built it specifically to sit *outside* the training distribution: brighter sun (42°–70° elevation vs 5°–40°), higher albedo, rougher terrain, wider lenses, bigger and fewer rocks. So this is a real and demanding generalization test — the model predicts on lighting, materials, and geometry it never trained on.
 
-But `test_photoreal` is still rendered by the **same simulator** that made the training data. It is **synthetic → synthetic** transfer. It is *not yet* the question the whole series exists to answer: does any of this survive contact with a **real lunar photograph**, taken by a real camera, of real regolith, under a real sun? That is the **sim-to-real gap**, and it is measured — honestly, with real imagery — in chapter 04. Domain randomization just earned +0.099 rock-IoU on an unseen synthetic domain. Whether that buys anything on actual lunar pixels is a separate, harder claim, and we have not made it yet.
+But `test_photoreal` is still rendered by the **same simulator** that made the training data. It is **synthetic → synthetic** transfer. It is *not yet* the question the whole series exists to answer: does any of this survive contact with a **real lunar photograph**, taken by a real camera, of real regolith, under a real sun? That is the **sim-to-real gap**, and it is measured — honestly, with real imagery — in chapter 04.
+
+And here is the trap we are walking into with our eyes open. We made the rocks photoreal; the synthetic score rose to 0.8521, the best in the project. The natural inference — *better fidelity, better number, therefore better model* — is the one chapter 04 is about to break. The realistic rocks are rough, gray, and bumpy. So is real lunar regolith at photographic resolution. A model trained to call "rough gray bumpy texture" rock learned something that scores beautifully on synthetic rocks and **catastrophically over-fires on real soil**. The 0.8521 is real. It is also about to mislead us. Turn the page.
 
 ---
 
@@ -191,9 +177,8 @@ Each run writes `best.pt`, `metrics.jsonl` (per-epoch curves), and `summary.json
 - **Fine-tuning** adapts a model that already learned general vision via **transfer learning** from **ImageNet**; we keep SegFormer-B0's MiT encoder and train a fresh 3-class decode head.
 - The **rock** class is 1–8% of pixels, so plain cross-entropy would ignore it; **class-weighted cross-entropy** up-weights rock ~13× and **rock-IoU** (not accuracy) selects the best checkpoint.
 - The **size-matched ablation** (`dr_750` vs `nodr_750`, both 750 frames) isolates domain randomization from dataset size — the honest comparison that 1500-vs-750 would have confounded.
-- **Domain randomization adds +0.099 rock-IoU (+14%) at matched size**; doubling the data on top adds a further +0.027. The gains land almost entirely on the hazard class; regolith and sky were already near-ceiling.
-- The mechanism is visible in the curves: the no-DR model **overfits** its single frozen appearance (train rock-IoU 0.830 vs val 0.689), while the DR model's first epoch already beats no-DR's best because randomized appearance gives it nothing to memorize.
-- The overlays confirm the character of the win — DR recovers bright boulders the no-DR model mislabels as sky and fills rocks it drops — across 267 of 300 frames.
-- **This is still a synthetic unseen-domain test.** The real sim-to-real gap, measured against actual lunar imagery, is chapter 04.
+- On the realistic rocks, **domain randomization adds +0.046 rock-IoU (+5.7%) at matched size** (0.8025 → 0.8486); doubling the data on top adds only +0.004 (0.8486 → 0.8521) — the curve has saturated. The deployed `dr_1500` ceiling is **0.8521** (regolith 0.9556 / rock 0.8521 / sky 0.9730).
+- The DR gain is **smaller than the +0.099 the cruder rocks gave**, because realistic geometry raised the no-DR baseline from 0.689 to 0.8025. Fidelity and domain randomization are partly **redundant** levers — raise one and the other has less left to add.
+- **This is still a synthetic unseen-domain test**, and the higher synthetic score is about to be a trap: a model that learned "rough gray bumpy = rock" scores beautifully on photoreal synthetic rocks and is primed to over-fire on real regolith. The real sim-to-real gap is chapter 04.
 
 Continue to [04 — Sim-to-real](04-sim-to-real.md).

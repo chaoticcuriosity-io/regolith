@@ -920,3 +920,58 @@ All internal chapter links (`00-primer.md` → `01-the-lunar-stage.md` → … �
 
 `docs/` (all chapters + assets) + `README.md` + `setup-notes.md`
 Message: `docs(task6): chapter 05 (the render) + README results section + finalize TOC/links for publish`
+
+---
+
+## Session 10 — 2026-06-27 — v2 realistic rocks: the full redo + the honest fidelity-vs-transfer finding
+
+### Goal
+
+Re-run the entire pipeline on **realistic rocks** (v2), preserve the v1 (low-poly) build as a documented "evolution," and reach the same publishable end-state as v1. The hypothesis going in was the obvious one: photoreal rocks → better model. Branch `v2-realistic` (off `rock-realism` @ `33a21fe`). Retraining approved.
+
+### What changed in the scene (`scene/build_lunar_stage.py`, +286/-21)
+
+Rocks only — the regolith ground was left as the plain displaced sheet (rocks were the ask). The old smooth low-poly faceted icospheres became **realistic noise-displaced basalt boulders**:
+
+- **Subdivision scaled to on-screen size** (`_subdiv_for_scale`): far specks subdiv-2 (162 v), mid subdiv-3, near subdiv-4, hero boulders subdiv-5 (10,242 v / 20,480 f). ~0.7 M tris/scene.
+- **Multi-octave 3-D fBm displacement** (`_displace_rock`, `_fbm_3d`, `_value_noise_3d`): coarse fBm lumps + a **ridged facet term** (`1 − |fBm|` → sharp creases/fractures) + medium bumps + fine grain, sampled anisotropically per rock (elongation). **Smooth per-vertex normals** (`_vertex_normals`) kill the faceting.
+- **12-material dark-basalt PBR pool** (`_make_rock_material_pool`): per-rock albedo 0.058–0.130 (darker than regolith), warm-gray tint + jitter, roughness 0.85–0.97. All per-rock appearance knobs are domain-randomizable.
+
+### Pipeline re-run (same infra as v1; RTX descriptor-leak rule from Session 5 honored)
+
+- **Dataset** regenerated 1500/750/300 on the realistic rocks (`regolith_data_v2/`; v1 data kept). **~9.4 s/frame** (4–5× v1 — per-frame high-poly geometry rebuild is the cost). Masks `{0,1,2}`, sane fractions, 0 unlabeled, leak-safe.
+- **Retrain** (`outputs/runs_v2/`), identical recipe to v1. Best epochs 18/19/13.
+
+### Results — synthetic UP, real DOWN (the whole point)
+
+**Synthetic (`test_photoreal`, val rock-IoU):**
+
+| Run | v1 (blocky) | v2 (realistic) |
+|-----|:-----------:|:--------------:|
+| nodr_750 | 0.689 | **0.8025** |
+| dr_750 (size-matched) | 0.788 | **0.8486** |
+| dr_1500 (deployed) | 0.815 | **0.8521** |
+| size-matched DR gain | +0.099 | **+0.046** |
+
+dr_1500 per-class [regolith 0.9556, rock 0.8521, sky 0.9730], mIoU 0.9269. `eval_synth` reproduced rock-IoU **0.8520** from `best.pt` (faithful inference path). More data saturates: dr_1500 only +0.004 over dr_750. **Insight:** realistic geometry raised the no-DR floor a lot (0.689→0.8025) → DR has less headroom (gain shrinks +0.099→+0.046); fidelity and DR are partly redundant levers.
+
+**Sim-to-real (7 real Apollo photos, no ground truth → qualitative + pixel-fraction counts):** the v2 model is **WORSE**. It **floods ~83% of real pixels as rock** (regolith ~4%), up from v1's ~52%. On real, `dr_1500` predicts **more** false rock than `nodr_750` on **all 7 frames** — the opposite of synthetic, where DR reduced over-segmentation. New **"rock-cloud"** artifact: rock hallucinated up into the black sky above the horizon (vivid on Apollo 14 cone-crater + large-boulder + Apollo 17). **Mechanism:** photoreal rocks (rough, gray, bumpy, matte) collapsed the rock-vs-regolith boundary toward "any rough gray texture = rock" — and real lunar regolith IS exactly that at photo resolution → it floods. v1's cruder rocks kept the classes visually separable, which accidentally protected transfer.
+
+### Re-render
+
+Reused the realistic beauty frames + **v2 `dr_1500` overlay**; clean on the in-distribution synthetic render (overlay caption shows rock-IoU 0.852). The point in the docs: the clean render is the *same* in-distribution flattery the synthetic benchmark gives — ch04 on real photos is the reality check.
+
+### Framing decision (Don) — EMBRACE THE HONEST TRADEOFF
+
+Headline is the **fidelity-vs-transfer lesson**, not "DR is magic": *higher fidelity + higher synthetic scores ≠ better real transfer; synthetic metrics can mislead; you must test on real.* Lead with it; don't bury it.
+
+### Docs rewrite (this session)
+
+- Rewrote `00`–`05` around the honest arc; **new chapter `06-rock-fidelity.md`** (the v1→v2 evolution, the technique, evolution-rocks + evolution-ablation figures, the full synthetic↑/real↓ story, the lesson) ends the series.
+- Chapter `04` fully reoriented to the flood finding (~83% rock; DR worse on real; rock-cloud; mechanism). Chapter `03`: v2 ablation numbers + smaller DR gain + saturation; **removed the v1 per-frame "DR wins 267/300" claim and deleted the v1 `ablation-00XXX.png` / `ablation-perframe.json`** (4 overlays + 1 JSON).
+- Swapped `eval-synth-dr1500.json` → v2 (0.852). Preserved v1 "before" figures as `*-v1.*` (ablation-rockiou-v1.png, dr-gallery-v1.png, real-apollo-v1.png, ablation-results-v1.json).
+- README / `docs/reports/README.md` / `docs/index.md` reframed around the tradeoff; Status now 7 chapters (00–06).
+
+### Artifacts
+
+Checkpoints + datasets stay on the Spark (`outputs/runs_v2/`, `regolith_data_v2/`) — git-excluded. Committed: v2 figures, v2 JSON, chapters. Scratchpad working copies in `scratchpad/v2-review/`.

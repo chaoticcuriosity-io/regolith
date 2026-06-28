@@ -4,7 +4,9 @@
 
 ---
 
-The primer explained why you need synthetic data. This chapter is where you actually build some. By the end you'll have a procedural lunar scene rendered at 1024 x 1024 — regolith ground, rock scatter, harsh low sun, near-black sky — and your first pixel-accurate 3-class segmentation mask. The reference frames at the bottom of this page came out of that exact run.
+The primer explained why you need synthetic data. This chapter is where you actually build some. By the end you'll have a procedural lunar scene — regolith ground, a field of realistic noise-displaced basalt boulders, harsh low sun, near-black sky — and your first pixel-accurate 3-class segmentation mask. The reference frames at the bottom of this page are rendered at 512 × 512 (the resolution the training dataset is generated at) and came out of that exact run.
+
+> **A note on what changed.** The rocks you see here are the *realistic* build (the second iteration). The first version of this scene used crude low-poly icospheres; chapter 06 tells the full story of why we rebuilt them as photoreal basalt — and the surprising sim-to-real cost that came with the upgrade. This chapter describes the rocks as they stand now.
 
 ---
 
@@ -20,7 +22,7 @@ The stage hierarchy looks like this:
 /World/
   Regolith          — displaced ground mesh (heightfield + craters), class "regolith"
   Rocks/
-    Rock_000 … Rock_N   — noise-deformed icospheres, class "rock"
+    Rock_000 … Rock_N   — noise-displaced basalt boulders, class "rock"
   Sun               — UsdLux.DistantLight, harsh, low elevation
   StarDome          — large emissive near-black sphere, class "sky"
   Stars/
@@ -50,15 +52,27 @@ _add_semantics(regolith_prim, "regolith")   # → canonical id 0
 
 ## The rocks (the hazard class)
 
-Rocks are the class that matters most for rover safety. The scene scatters approximately 75–115 **noise-deformed icospheres** across the terrain, with 12 guaranteed near-field boulders to ensure the hazard class is always visible close to the camera.
+Rocks are the class that matters most for rover safety — so they get the most geometric care. The scene scatters approximately 75–115 **noise-displaced basalt boulders** across the terrain, with 12 guaranteed near-field boulders to ensure the hazard class is always visible close to the camera. These are not the smooth low-poly blobs of the first build; they are irregular, eroded, sub-angular rocks, and the difference is what chapter 06 is about.
 
-An **icosphere** — subdivision-2 geodesic sphere, 162 vertices / 320 faces — is the base mesh. Each rock instance gets its radial extent deformed by a superposition of six sinusoidal lobes on random axes — the `_rock_radius_multiplier` function — producing a lumpy, irregular shape that reads as a rock rather than a perfect sphere. Deformation amplitude is 55% of the base radius: enough to look organic without collapsing faces.
+The base mesh is still an **icosphere** (a geodesic sphere), but the subdivision level now **scales with the rock's on-screen size**, via `_subdiv_for_scale`. A pebble a few pixels wide stays at subdivision-2 (162 vertices / 320 faces) — spending more polygons on it would be wasted. A large near-field boulder gets subdivision-4 (2,562 verts) and the biggest hero boulders subdivision-5 (10,242 verts / 20,480 faces), enough resolution that the displacement reads as fine pits and creases rather than facets. A full nominal scene runs on the order of ~0.7 M triangles.
 
-Each rock gets independent random scale, rotation, and XY placement. The scale is non-uniform (`sx`, `sy`, `sz` drawn separately, with `sz` biased 0.5–0.9x to produce the flat-bottomed profiles typical of impact ejecta). Every rock is partially **embedded** in the regolith — sunk to 30% of its Z half-extent below the local terrain height, sampled by bilinear interpolation of the height grid. This prevents the "floating rock" visual artifact that signals a synthetic dataset immediately.
+The shape comes from **multi-octave 3-D value noise** displacing each vertex along its radial direction (`_displace_rock`). Four terms stack:
+
+- **Coarse fBm lumps** — the overall blocky boulder form (4 octaves of 3-D fractional Brownian motion).
+- **A ridged "facet" term** — `1 − |fBm|`, which turns noise valleys into sharp ridges, producing the angular creases and planar fracture faces of real broken basalt rather than smooth bulges.
+- **Medium bumps** and **fine grain** — higher-frequency octaves that add surface texture down to the pit scale.
+
+The noise domain is sampled **anisotropically per rock** (a random offset plus a per-axis stretch), so boulders come out elongated and individually distinct rather than spherical variations on one shape. Crucially, the displaced mesh is shaded with **smooth per-vertex normals** — face normals averaged into the shared vertices (`_vertex_normals`) — which is what dissolves the old visible facets into a continuous matte basalt surface.
+
+The material is no longer a single gray. Rocks draw from a small **pool of 12 dark-basalt PBR materials** (`_make_rock_material_pool`): per-material base albedo in 0.058–0.130 (dark-to-medium basalt, deliberately **darker** than the 0.18–0.22 regolith), a faint warm-gray tint with per-channel jitter, and high roughness (0.85–0.97). Sharing a 12-material pool across the whole field gives tonal variety without authoring a unique shader per rock. All of these — per-rock albedo, roughness, and displacement amplitude — are domain-randomizable knobs (chapter 02).
+
+Each rock still gets independent random scale, rotation, and XY placement. The scale is non-uniform (`sx`, `sy`, `sz` drawn separately, with `sz` biased to produce the flat-bottomed profiles typical of impact ejecta). Every rock is partially **embedded** in the regolith — sunk below the local terrain height, sampled by bilinear interpolation of the height grid — which prevents the "floating rock" artifact that signals a synthetic dataset immediately.
 
 ```python
 _add_semantics(prim, "rock")   # → canonical id 1
 ```
+
+Hold one fact for later: these rocks are *rough, gray, and bumpy* — and so, at photographic resolution, is real lunar regolith. That visual resemblance is exactly what comes back to bite the model in chapter 04.
 
 ---
 
@@ -134,24 +148,24 @@ You can't hardcode that — the numbering is an implementation detail that can c
 
 ## The reference frames
 
-The first real lunar frame: seed 42, 1024 x 1024, the validated nominal scene.
+The validated nominal scene: seed 42, 512 × 512. A single large noise-displaced basalt boulder dominates the near field — rough, pitted, sub-angular, sunk into the regolith — with smaller rocks scattered toward the horizon under a near-black starfield sky.
 
-![RGB render of the lunar stage — regolith ground with scattered rocks, harsh low sun casting long shadows, near-black starfield sky](assets/scene-reference-rgb.png)
+![RGB render of the lunar stage — a large rough basalt boulder in the near field, smaller rocks scattered toward the horizon, harsh low sun casting long shadows, near-black starfield sky](assets/scene-reference-rgb.png)
 
-The corresponding 3-class segmentation mask, colorized with the project's fixed palette — tan = regolith, red-orange = rock, deep blue = sky:
+The corresponding 3-class segmentation mask, colorized with the project's fixed palette — tan = regolith, red = rock, blue = sky:
 
-![3-class segmentation mask — tan regolith, red-orange rocks, deep blue sky](assets/scene-reference-seg.png)
+![3-class segmentation mask — tan regolith, red rock (the large near-field boulder plus a smaller cluster at right), blue sky](assets/scene-reference-seg.png)
 
-Pixel counts for this frame:
+Approximate class coverage for this frame, read off the mask:
 
-| Class | Id | Pixels | Coverage |
-|-------|----|--------|----------|
-| regolith | 0 | 476,877 | 45.5% |
-| rock | 1 | 62,360 | 6.0% |
-| sky | 2 | 509,339 | 48.6% |
-| UNLABELED | 255 | 0 | 0.0% |
+| Class | Id | Coverage |
+|-------|----|----------|
+| regolith | 0 | ≈ 37% |
+| rock | 1 | ≈ 22% |
+| sky | 2 | ≈ 41% |
+| UNLABELED | 255 | 0% |
 
-Rock at 6.0%, zero unlabeled pixels, RGB mean 104.5 / p99 240 — lit, not black. That's what a valid scene looks like.
+Rock reads at ≈ 22% here — well above the 1–8% typical of a training frame — because this reference is deliberately composed around one large near-field boulder. Zero unlabeled pixels, RGB mean 103.4 / p99 240 / max 249 — lit, not black. That's what a valid scene looks like.
 
 ---
 
@@ -222,7 +236,7 @@ Cold first frame: ~160 s (RTX shader compile on the GB10). Warm subsequent frame
 ## What you now understand
 
 - A USD stage is a prim hierarchy; every prim can carry a USD Semantics class label that Replicator reads at render time.
-- The scene is five components: a displaced fBm heightfield (regolith), noise-deformed icosphere scatter (rocks), a `DistantLight` (the sun), an emissive near-black dome with a spherical-cap hole (sky), and a rover-height camera.
+- The scene is five components: a displaced fBm heightfield (regolith), a field of realistic noise-displaced basalt boulders (rocks — icosphere base, subdivision scaled by on-screen size, displaced by 3-D fBm lumps plus a ridged facet term, smoothed with per-vertex normals, shaded from a 12-material dark-basalt PBR pool), a `DistantLight` (the sun), an emissive near-black dome with a spherical-cap hole (sky), and a rover-height camera.
 - The canonical class map is `{regolith: 0, rock: 1, sky: 2}`, with 255 as the ignore index for unlabeled pixels.
 - Replicator writes raw label ids, not canonical ids — the labels JSON is the stable key; `canonical_mask_from_json()` does the remap.
 - Four gotchas to carry forward: the singleton annotator (sequential passes), dome-occludes-sun (spherical cap), Fresnel flare (unlit sky material), and numpy-to-Gf scalar casting.

@@ -4,11 +4,9 @@
 
 ---
 
-Five chapters in, you have a trained model with a number: `dr_1500` scores **0.815 rock-IoU** on an unseen synthetic domain, and it transfers partially to real Apollo photographs — the horizon and large boulders come back right; fine regolith and deep shadows are still hard. The sim-to-real gap is named and measured. What you have not done yet is *show the model working*, in motion, on something that looks like what it is meant to protect.
+Five chapters in, you have a trained model with two very different numbers. On synthetic data `dr_1500` scores **0.852 rock-IoU** — the best in the project. On real Apollo photographs (chapter 04) the same weights flood ~83% of the frame with false rock. The sim-to-real gap is named and measured, and it is wide. What you have not done yet is *show the model working* — in motion, on the kind of scene it was actually trained for.
 
-That is this chapter. You will use NVIDIA Omniverse's **RTX renderer** to fly a rover camera slowly into a boulder field — a low-sun scene with long raking shadows — and composite the trained hazard model's predictions onto every frame in real time. Boulders glow red with a bright detection outline. Safe traversable ground goes green. Sky is untouched. The result is a rover's-eye **hazard HUD** rendered cinematically at 1920 × 1080 and assembled into a 5.9-second flythrough.
-
-This is the loop closing: synthetic data → trained model → per-frame inference → cinematic render, everything on one 128 GB DGX Spark.
+That is this chapter, and it comes with a warning attached. You will use NVIDIA Omniverse's **RTX renderer** to fly a rover camera slowly into a boulder field — a low-sun scene with long raking shadows — and composite the trained hazard model's predictions onto every frame in real time. Boulders glow red with a bright detection outline. Safe traversable ground goes green. Sky is untouched. The result is a rover's-eye **hazard HUD** rendered cinematically at 1920 × 1080 and assembled into a flythrough — and it looks *clean*. That cleanliness is exactly the thing chapter 04 warned you not to trust: this scene is **in-distribution**, so the overlay flatters the model the same way the 0.852 synthetic score does. The render is the loop closing — synthetic data → trained model → per-frame inference → cinematic render, all on one 128 GB DGX Spark — and a live demonstration of *why a beautiful synthetic result is not evidence of real-world readiness.*
 
 ---
 
@@ -110,15 +108,15 @@ The mean predicted rock fraction across all 142 frames is **~6.9%**, consistent 
 
 ## Why the overlay is clean — and the honest asterisk
 
-The overlay looks coherent: tight outlines, green regolith floor, no stray sky patches in the foreground. Three reasons, stated plainly:
+The overlay looks coherent: tight outlines, green regolith floor, no stray rock bleeding into the sky. Three reasons, stated plainly:
 
-**In-distribution scene.** The model trained on scenes that look like this one. The failure modes from chapter 04 — over-segmentation of fine regolith, shadows painted as sky, thin lens-flared sky missed — do not fully appear because the scene was designed to fall inside the training distribution. Low grazing sun, clean near-black sky, mid-gray regolith, large near-field rocks: every frame is the model's home territory.
+**In-distribution scene.** The model trained on scenes that look exactly like this one — the same renderer, the same regolith heightfield, the same basalt boulders. The catastrophic failure from chapter 04 — flooding ~83% of a real frame with false rock, plus the rock-cloud in the sky — does not appear, because here the regolith is the *synthetic* regolith the model learned to tell apart from rock. On real film the soil carries the rough gray bumpy texture the model reads as rock; the renderer's smooth heightfield does not. So the boundary that collapsed on real pixels holds perfectly here. This is the single most important caveat in the chapter: **the overlay is clean because the ground is fake.** The clean 0.852 synthetic score and this clean render are the *same* flattery, produced by the *same* in-distribution comfort — and chapter 04 is what happens when you remove it.
 
 **Inference on unmodified pixels.** The `--display-gain` adjustment was applied after the fact, to the composite. The model's input was the raw RTX `LdrColor` output — the same brightness regime as training frames, un-adjusted.
 
 **Boulder-field design.** Fourteen near-field boulders close enough to produce solid large-area rock detections, against a clearly textured regolith floor and near-black sky. The scene was chosen to be *legible*, not to be the hardest possible case.
 
-The clean overlay is a demonstration of the capability this series set out to build — a model that correctly identifies rocks when shown the kind of scene it trained on, shown cinematically. It is not a proof of real-world readiness. Chapter 04 is that proof, and it showed a gap. Both results are part of the honest record.
+The clean overlay is a demonstration of the capability this series set out to build — a model that correctly identifies rocks when shown the kind of scene it trained on, shown cinematically. It is **not** a proof of real-world readiness, and after chapter 04 you should distrust it precisely *because* it is so clean. Chapter 04 is the reality check, and it showed not a gap but a flood. Both results are part of the honest record — and the gap between this beautiful render and that flooded Apollo frame is the whole point.
 
 ---
 
@@ -168,27 +166,12 @@ Committed to `docs/reports/assets/`: `render-hero-{1..4}.png`, `render-preview.m
 - **RTX rendering** in Omniverse uses `RayTracedLighting` with `rt_subframes` accumulation for path-traced output; 48 subframes at 1920 × 1080 runs at ~2.4 s/frame on a DGX Spark.
 - **`BasicWriter` writes black frames** on this hardware because it reads the `LdrColor` buffer before DLSS temporal accumulation and auto-exposure converge. Fix: attach an `LdrColor` annotator directly, drive convergence with sustained real camera motion, and skip-save frames below a brightness threshold.
 - **`--display-gain` touches the composite only.** The model sees the original pixels; the gain is cosmetic output adjustment. When you read "predictions are real," this is what that means.
-- **In-distribution vs out-of-distribution** determines overlay quality more than model quality. The render demonstrates the ceiling; chapter 04 measured the floor.
+- **In-distribution vs out-of-distribution** determines overlay quality more than model quality. The render demonstrates the flattering in-distribution ceiling (0.852); chapter 04 removed the comfort and measured the flood (~83% false rock on real soil). A clean synthetic overlay is not evidence of real-world readiness — it is the same in-distribution flattery the synthetic benchmark gives.
 - The three-stage pipeline (render → overlay → assemble) keeps Isaac Sim, PyTorch, and ffmpeg in separate containers and host processes, avoiding dependency conflicts on the DGX.
 - Never force-kill an Isaac container mid shader-compile — it leaves a stale `_cache.lock` that hangs the next container at boot.
 
 ---
 
-## What you've built
+The render is the loop closed: scene → dataset → trained model → cinematic inference, end to end on one machine. But it is also the most flattering view of the model in the entire series — the in-distribution best case, shown cinematically. Chapter 04 was the worst case, on real pixels. The two together raise the question the final chapter answers: we made the rocks realistic to *improve* this, and it made the real-world result worse — so what actually happened, and what is the lesson? Chapter 06 tells that story start to finish, with the before-and-after geometry side by side.
 
-This is the end of the series. Here is the full arc, chapter by chapter:
-
-| Chapter | What you built | The honest number |
-|---------|---------------|-------------------|
-| [00 — Primer](00-primer.md) | The map: semantic segmentation, synthetic data, the sim-to-real gap, domain randomization, the DGX Spark | — |
-| [01 — The lunar stage](01-the-lunar-stage.md) | A procedural OpenUSD scene: regolith heightfield, rock instancer, sun, dome, rover camera | First pixel-accurate segmentation mask |
-| [02 — Domain randomization](02-domain-randomization.md) | A Replicator pipeline generating 2,550 labeled frames across three splits — DR, no-DR, unseen-domain test | 1,500 / 750 / 300 frames; rock class 1–8% |
-| [03 — Training](03-training.md) | SegFormer-B0 fine-tuned on synthetic data; honest size-matched ablation isolating DR from dataset size | **+0.099 rock-IoU** from DR (0.689 → 0.788); DR-1500 ceiling 0.815 |
-| [04 — Sim-to-real](04-sim-to-real.md) | Transfer evaluation on 7 real Apollo photographs — no cherry-picking, no fabricated IoU | Partial transfer: horizon + large boulders work; fine regolith over-segmented; DR better, not fixed |
-| [05 — The render](05-the-render.md) | 1920 × 1080 RTX flythrough with live `dr_1500` hazard overlay | 142 lit frames, 24 fps, 5.9 s, 1.23 MB, one DGX Spark |
-
-**The honest bottom line:** domain randomization works — +0.099 rock-IoU at matched dataset size on an unseen synthetic domain, and directionally on real imagery too (less false rock, far fewer shadow-as-sky errors). The sim-to-real gap is real: fine regolith over-segments as rock, deep shadows get called sky, and neither model is ready to fly a rover without real labeled lunar data in the loop. That is the honest version of "it works."
-
-What the series proves: you can close a complete physical-AI perception loop — scene authoring, labeled dataset, trained segmentation model, cinematic render with live inference — on a single 128 GB machine, in under a week of compute. The loop runs end to end. That is the deliverable.
-
-→ Back to the [repo root](../../README.md) · Browse all chapters in [`docs/reports/`](README.md) · Start over at [00 — Primer](00-primer.md)
+Continue to [06 — Rock fidelity: an evolution](06-rock-fidelity.md).

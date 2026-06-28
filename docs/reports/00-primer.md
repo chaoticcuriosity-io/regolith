@@ -46,7 +46,9 @@ This is called the **sim-to-real gap** — the performance drop you observe when
 
 The standard fix is **domain randomization**: deliberately vary the simulation parameters wildly during training — sun elevation from horizon to zenith, rock albedo across a wide spectrum, camera field of view, regolith texture, rock count and scale — so that no single renderer artifact dominates. The model can't overfit to one lighting scheme or one texture style because it never sees the same one twice. What it *does* see, consistently, is the shapes and depth relationships between rock, ground, and sky — and those are real.
 
-Domain randomization doesn't close the gap completely. Chapter 04 of this series characterizes the remaining gap on real Apollo imagery — the honest version of "it works."
+Domain randomization doesn't close the gap completely. Chapter 04 characterizes the remaining gap on real Apollo imagery — the honest version of "it works."
+
+A warning about the destination, set down here at the start: this series does **not** end on a clean win. We built the synthetic world twice — first with crude, low-poly rocks, then with photoreal, noise-displaced basalt boulders — and the second, more realistic version scored *higher* on every synthetic benchmark while transferring *worse* to real lunar photographs. Higher fidelity and a higher synthetic score did not buy better real-world behavior; they cost it. That counter-intuitive result — why it happens, and what it teaches about trusting synthetic metrics — is the spine of the whole piece. Chapter 06 names it outright. Read for the surprise, not the trophy.
 
 ---
 
@@ -69,9 +71,10 @@ There's one important gotcha: unified memory means an out-of-memory event doesn'
 | [03 — Training](03-training.md) | A SegFormer fine-tuned on the synthetic dataset | val rock-IoU (the hazard class that matters most) |
 | [04 — Sim-to-real evaluation](04-sim-to-real.md) | A transfer evaluation on real Apollo-era surface imagery | Qualitative transfer assessment — no fabricated real IoU |
 | [05 — The render](05-the-render.md) | A cinematic RTX render with per-pixel segmentation overlaid | Artifact: `.mp4` render, published as a GitHub Release |
+| [06 — Rock fidelity](06-rock-fidelity.md) | The v1→v2 evolution: low-poly rocks made photoreal, and what that did to transfer | The honest tradeoff: synthetic ↑, real ↓ |
 
 ---
 
-No pretense: the gap in chapter 04 will exist and may be significant. Domain randomization helps; it doesn't perform miracles. The point of this series is to build the full loop — generate, train, measure, render — and document what actually happens at each step.
+No pretense: the gap in chapter 04 will exist and is significant — in the realistic-rock build it is worse, not better, than it was with crude rocks. Domain randomization helps on synthetic data; on real imagery it does not perform miracles, and naive realism can actively backfire. The point of this series is to build the full loop — generate, train, measure, render — and document what actually happens at each step, including the step where the obvious improvement made things worse.
 
 Continue to [01 — The lunar stage](01-the-lunar-stage.md).

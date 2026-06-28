@@ -11,11 +11,11 @@ That's the whole idea. This series shows you the full loop: build a USD scene, r
 
 ---
 
-## Results
+## Results — an honest surprise
 
-Domain randomization adds **+0.099 rock-IoU** on an unseen synthetic domain (0.689 → 0.788, size-matched). The full DR-1500 model scores 0.815. On 7 real Apollo photographs the transfer is partial — large boulders and the horizon/sky boundary work; fine regolith is over-segmented; DR reduces false positives and largely removes the shadow-as-sky error that the no-DR model commits. DR is better, not fixed.
+We made the synthetic rocks photoreal. The synthetic benchmark went **up**: deployed rock-IoU 0.815 → **0.852** on an unseen synthetic domain, with domain randomization adding +0.046 size-matched. But real-world transfer got **worse**: on 7 real Apollo photographs the photoreal model **floods** ~83% of pixels with false rock (up from ~52%), because photoreal rocks (rough, gray, bumpy) collapsed the rock-vs-regolith boundary toward "any rough gray texture is rock" — and real lunar regolith is exactly that. **Higher fidelity + higher synthetic score ≠ better real transfer.** Synthetic metrics can mislead; you have to test on real data.
 
-The series closes with a 1920×1080 cinematic RTX flythrough — a rover-eye dolly into a boulder field with the deployed model's predictions overlaid live on every frame.
+The series closes with a 1920×1080 cinematic RTX flythrough — a rover-eye dolly into a boulder field with the deployed model's predictions overlaid live. The overlay is clean, but only because the scene is in-distribution — the same flattery the synthetic score gives.
 
 ![Preview animation — cinematic flythrough with live hazard overlay](reports/assets/render-preview.gif)
 
@@ -29,11 +29,12 @@ The series closes with a 1920×1080 cinematic RTX flythrough — a rover-eye dol
 
 | Chapter | Topic |
 |---------|-------|
-| [01 — The lunar stage](reports/01-the-lunar-stage.md) | USD scene: terrain, rocks, lighting |
+| [01 — The lunar stage](reports/01-the-lunar-stage.md) | USD scene: terrain, realistic basalt rocks, lighting |
 | [02 — Domain randomization](reports/02-domain-randomization.md) | Replicator pipeline + 2,550-frame labeled dataset |
-| [03 — Training](reports/03-training.md) | SegFormer fine-tuning + honest DR ablation |
-| [04 — Sim-to-real](reports/04-sim-to-real.md) | Transfer gap, measured on real Apollo photos |
+| [03 — Training](reports/03-training.md) | SegFormer fine-tuning + honest DR ablation (+0.046; ceiling 0.852) |
+| [04 — Sim-to-real](reports/04-sim-to-real.md) | The flood: ~83% of real regolith called rock |
 | [05 — The render](reports/05-the-render.md) | Cinematic 1920×1080 RTX flythrough with live hazard overlay |
+| [06 — Rock fidelity](reports/06-rock-fidelity.md) | The v1→v2 evolution and the honest fidelity-vs-transfer tradeoff |
 
 ---
 

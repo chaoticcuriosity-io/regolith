@@ -65,6 +65,16 @@ Every randomized knob and its actual range in the main training split, with the 
 | Near-rock Y band | -80 to -46 m | How close the near boulders sit to the camera. |
 | Embedding depth | 0.22–0.42 fraction | How deep rocks sink into the regolith surface. |
 
+### Rock appearance (new in the realistic build)
+
+The photoreal basalt rocks of chapter 01 carry their own randomizable look, drawn per-rock from a shared 12-material pool:
+
+| Knob | Range | Notes |
+|------|-------|-------|
+| Rock albedo | 0.058–0.130 | Per-rock grayscale base, dark-to-medium basalt — deliberately **darker** than the regolith. |
+| Rock roughness | 0.85–0.97 | Uniformly matte/dusty; no specular highlights. |
+| Rock displacement amplitude | ~0.34 nominal | How irregular/eroded the noise displacement makes each boulder. |
+
 ### Camera
 
 | Knob | Range | Notes |
@@ -135,11 +145,11 @@ A model that memorized training-domain appearance will degrade here. A domain-ra
 
 ## The gallery: what domain randomization looks like in practice
 
-Twelve frames sampled from the live `train_dr` generation — every ~40th frame from the first 478 written to the Spark, spread across seeds and parameter draws:
+Twelve frames sampled from the live `train_dr` generation — spread across seeds and parameter draws:
 
-![Contact sheet of 12 domain-randomized training frames — varying sun angle, surface albedo, rock count and scale, and camera height across the set](assets/dr-gallery.png)
+![Contact sheet of 12 domain-randomized training frames on the realistic basalt rocks — varying sun angle, surface albedo, rock count and scale, and camera height across the set](assets/dr-gallery.png)
 
-Each cell is a different appearance of the same underlying problem. Sun elevation and direction vary visibly: some frames have long raking shadows from the left, others shorter shadows from above and behind. Albedo spans from nearly-black basalt to mid-gray highland. Rock density swings from a sparse scatter to boulder-strewn foreground. The camera height differences are subtle but affect how much sky vs. ground dominates the frame.
+Each cell is a different appearance of the same underlying problem. The rocks are the realistic noise-displaced basalt boulders from chapter 01 — rough, pitted, sub-angular. Sun elevation and direction vary visibly: some frames have long raking shadows from the left, others shorter shadows from above and behind. Albedo spans from nearly-black basalt to mid-gray highland. Rock density swings from a sparse scatter to a boulder-strewn foreground. The camera height differences are subtle but affect how much sky vs. ground dominates the frame.
 
 Every one of these has a paired pixel-accurate segmentation mask in `train_dr/mask/` on the Spark — same filename stem, values in `{0, 1, 2}`. That's the training signal.
 
