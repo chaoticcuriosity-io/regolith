@@ -975,3 +975,42 @@ Headline is the **fidelity-vs-transfer lesson**, not "DR is magic": *higher fide
 ### Artifacts
 
 Checkpoints + datasets stay on the Spark (`outputs/runs_v2/`, `regolith_data_v2/`) — git-excluded. Committed: v2 figures, v2 JSON, chapters. Scratchpad working copies in `scratchpad/v2-review/`.
+
+## Session 11 — 2026-06-29 — v3 descriptor leak hit WITHIN a split at 954 (per-mesh rocks) → chunked fresh-container fix
+
+### Symptom
+
+The durable v3 generator (`scripts/generate_all_v3.sh`, one fresh Isaac container **per split** + a reclaim gap between splits — the Session 5 discipline) was launched detached for the full 1500/750/300 run. It **hung inside the very first split**: `train_dr` stalled at **954/1500**, the in-container python spinning ~671% CPU with no exit, and the log ended on `2026-06-28T19:08:56Z [Fatal] [omni.rtx] Out of resource descriptors!` right after `FRAME 00953 ok` (i.e. while authoring frame 954). Same RTX resource-descriptor leak as Session 5 — but this time it bit **mid-split**, not at a split boundary.
+
+### Root cause — per-mesh rocks burn descriptors ~1.6× faster
+
+The v3 PREMIUM scene authors **~1400–1700 INDIVIDUAL per-mesh `rock` prims every frame** (the fix that makes pebbles segment into class 1 instead of vanishing into an instancer). Each per-mesh prim consumes RTX resource descriptors that the leak never fully reclaims within a process, so the **per-PROCESS descriptor budget is only ~954 frames — BELOW a single 1500-frame split.** Session 5's "one fresh container per split" is therefore *insufficient* for v3: the budget is smaller than the split itself. The 954 frames already on disk (`regolith_data_v3/train_dr/`, indices 0…953, contiguous, rgb+mask+frames.jsonl all 954) are valid and were kept.
+
+### Fix — `scripts/generate_chunked_v3.sh` (chunk every split, fresh container per chunk)
+
+Extends `generate_all_v3.sh` into a leak-**resilient** orchestrator:
+
+- **Chunk each split into ≤500 frames** (`CHUNK=500`, a safe margin under the ~954 budget), each rendered in a **FRESH** `isaac-v3-chunk` container (resets the descriptor pool), with a **GPU-idle reclaim gap** (`RECLAIM_GAP=240s`) between *every* chunk — the leak only reclaims after the container is gone **and** the GPU goes idle (Session 5).
+- **Per-chunk WATCHDOG**: polls the split's `mask/` count; kills the container + retries the chunk on (a) the descriptor `Fatal` in the chunk log, (b) the generator process exiting short of target, or (c) a **stall** (no new frame for >`STALL_TIMEOUT=300s`). So a single hang can no longer freeze the whole run for hours.
+- **Recount-driven idempotent resume**: before every chunk the orchestrator recomputes `start = (#mask files already on disk)` and `n = min(CHUNK, target − start)`. Retries therefore resume exactly where the data ends — no gaps, no dups, even after a kill mid-chunk. A `MAX_STUCK=5` no-progress guard aborts a truly stuck split instead of looping forever.
+
+### Resume is index-exact and dup-free (verified, in code AND empirically)
+
+`generate_dataset_v3.py` already supports `--start-index` (logged as `start=`). Each frame's seed is keyed to its **absolute** index — `seed_i = _frame_seed(base_seed, start_index + k)` — and files are numbered `rgb_%05d`/`mask_%05d` by that index; `frames.jsonl` is wiped **only** when `start_index==0` (resume appends). So a chunk is just `--start-index <#done> --n <chunk>`, and resumed frames carry the same seeds/filenames they'd have had in one 0…N run. **Empirical proof:** the resumed `train_dr` chunk rebuilt frame 954 with `seed=955447137`, scatter `1432` per-mesh rocks, craters `4/31/199` — **identical** to the seed/scene the original run had started for frame 954 immediately before the fatal. No re-render of 0…953.
+
+### Gotcha worth recording
+
+`CHUNK_DIR` (`regolith_data_v3/chunks/`, where each chunk's log lives) is created on the host as UID 1001 but written by the **in-container UID 1234** via the generator's stdout redirect. At default 755 the redirect fails *Permission denied* and the generator never launches (silent: container shows only `sleep infinity`). It **must be `chmod 777`** like `DATA_DIR`/`CACHE_DIR`.
+
+### Run
+
+Resume `train_dr` 954→1499 (2 chunks: 954–1453, 1454–1499) + `train_nodr` 0→749 (2 chunks) + `test_photoreal` 0→299 (1 chunk, seed 7777, rt_subframes=8). 5 chunks, ~4.5–5 h ETA. Launched detached on the Spark:
+
+```bash
+nohup setsid bash scripts/generate_chunked_v3.sh \
+    > regolith_data_v3/master_chunked.log 2>&1 < /dev/null &
+# monitor:
+tail -f regolith_data_v3/master_chunked.log
+```
+
+Completion criteria: `train_dr=1500`, `train_nodr=750`, `test_photoreal=300`; contiguous indices, no gaps/dups; masks `{0,1,2}` with rock incl. pebbles.
