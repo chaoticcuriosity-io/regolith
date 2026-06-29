@@ -48,7 +48,7 @@ The standard fix is **domain randomization**: deliberately vary the simulation p
 
 Domain randomization doesn't close the gap completely. Chapter 04 characterizes the remaining gap on real Apollo imagery — the honest version of "it works."
 
-A warning about the destination, set down here at the start: this series does **not** end on a clean win. We built the synthetic world twice — first with crude, low-poly rocks, then with photoreal, noise-displaced basalt boulders — and the second, more realistic version scored *higher* on every synthetic benchmark while transferring *worse* to real lunar photographs. Higher fidelity and a higher synthetic score did not buy better real-world behavior; they cost it. That counter-intuitive result — why it happens, and what it teaches about trusting synthetic metrics — is the spine of the whole piece. Chapter 06 names it outright. Read for the surprise, not the trophy.
+A warning about the shape of this story, set down here at the start: it does not run in a straight line to a clean win. We built the synthetic world three times. First with crude, low-poly rocks (v1); then with photoreal, noise-displaced basalt boulders (v2) — and that more realistic version scored *higher* on every synthetic benchmark while transferring *worse* to real lunar photographs. Higher rock fidelity and a higher synthetic score did not buy better real-world behavior; they cost it. That counter-intuitive failure — why it happens, and what it teaches about trusting synthetic metrics — is the spine of the whole piece; chapter 06 names it outright. But the failure is also a clue. Its diagnosis says the realism was on the wrong surface, and the third build (v3, chapter 07) acts on that — moving the fidelity onto the *ground* — and the real-world transfer finally improves. Read for the arc: the surprise, then the fix it pointed to.
 
 ---
 
@@ -71,10 +71,11 @@ There's one important gotcha: unified memory means an out-of-memory event doesn'
 | [03 — Training](03-training.md) | A SegFormer fine-tuned on the synthetic dataset | val rock-IoU (the hazard class that matters most) |
 | [04 — Sim-to-real evaluation](04-sim-to-real.md) | A transfer evaluation on real Apollo-era surface imagery | Qualitative transfer assessment — no fabricated real IoU |
 | [05 — The render](05-the-render.md) | A cinematic RTX render with per-pixel segmentation overlaid | Artifact: `.mp4` render, published as a GitHub Release |
-| [06 — Rock fidelity](06-rock-fidelity.md) | The v1→v2 evolution: low-poly rocks made photoreal, and what that did to transfer | The honest tradeoff: synthetic ↑, real ↓ |
+| [06 — Rock fidelity](06-rock-fidelity.md) | The v1→v2 evolution: low-poly rocks made photoreal, and what that did to transfer | The failure: synthetic ↑, real ↓ |
+| [07 — Realistic ground](07-realistic-ground.md) | The v3 fix: fidelity moved to the ground (cratered dark displaced regolith) + VIPER render | The win: synthetic ↑ (0.887), real flood ↓ (35.7%) |
 
 ---
 
-No pretense: the gap in chapter 04 will exist and is significant — in the realistic-rock build it is worse, not better, than it was with crude rocks. Domain randomization helps on synthetic data; on real imagery it does not perform miracles, and naive realism can actively backfire. The point of this series is to build the full loop — generate, train, measure, render — and document what actually happens at each step, including the step where the obvious improvement made things worse.
+No pretense: the gap in chapter 04 is real and significant — in the photoreal-rock build it is worse, not better, than it was with crude rocks. Domain randomization helps on synthetic data; on real imagery it does not perform miracles, and naive realism can actively backfire when you apply it to the wrong surface. The point of this series is to build the full loop — generate, train, measure, render — and document what actually happens at each step: the step where the obvious improvement made things worse, *and* the step (chapter 07) where the diagnosis of that failure led to a fix that finally made the real-world numbers move the right way.
 
 Continue to [01 — The lunar stage](01-the-lunar-stage.md).

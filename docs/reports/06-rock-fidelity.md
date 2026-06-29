@@ -87,7 +87,7 @@ None of this means the realistic rocks were a mistake to build, or that syntheti
 
 ## What you've built
 
-This is the end of the series. The full arc, chapter by chapter:
+This is the turning point of the series — not the end of it. The diagnosis in this chapter (the realism was on the wrong surface) became the hypothesis for **v3**, where moving the fidelity onto the *ground* finally dropped the real flood; that is [chapter 07](07-realistic-ground.md). The arc through this chapter, chapter by chapter:
 
 | Chapter | What you built | The honest number |
 |---------|---------------|-------------------|
@@ -101,6 +101,8 @@ This is the end of the series. The full arc, chapter by chapter:
 
 **The honest bottom line:** we made the synthetic rocks photoreal. The synthetic benchmark went up — rock-IoU 0.815 → 0.852. Real-world transfer got worse — the model now floods ~83% of real Apollo pixels with rock, up from ~52%. **Higher fidelity and a higher synthetic score did not mean better real transfer; they meant worse.** The cause is concrete: photoreal rocks (rough, gray, bumpy) collapsed the rock-vs-regolith boundary toward "any rough gray texture is rock," and real lunar regolith is exactly that at photo resolution. Synthetic metrics can mislead; base fidelity and domain randomization both shape sim-to-real and interact; naive realism can backfire. The only way to know is to test on real data — which is the entire reason this chapter exists.
 
-What the series *does* prove, mechanically: you can close a complete physical-AI perception loop — scene authoring, labeled dataset, trained segmentation model, sim-to-real evaluation on real imagery, cinematic render with live inference — on a single 128 GB machine, in under a week of compute, twice over, and learn something real from the comparison. The loop runs end to end. The lesson it surfaced is the deliverable.
+What the series *does* prove, mechanically: you can close a complete physical-AI perception loop — scene authoring, labeled dataset, trained segmentation model, sim-to-real evaluation on real imagery, cinematic render with live inference — on a single 128 GB machine, in under a week of compute, twice over, and learn something real from the comparison. The loop runs end to end. The lesson it surfaced is the deliverable — and it is also the lever for the next build.
 
-→ Back to the [repo root](../../README.md) · Browse all chapters in [`docs/reports/`](README.md) · Start over at [00 — Primer](00-primer.md)
+Because this failure is not the last word. Read the mechanism once more — the texture shortcut existed only because the *ground* was smooth while the rocks were rough — and it tells you exactly what to try next: make the ground realistic too. Chapter 07 does that, and the real flood finally drops.
+
+Continue to [07 — Realistic ground: the sim-to-real lever](07-realistic-ground.md).
