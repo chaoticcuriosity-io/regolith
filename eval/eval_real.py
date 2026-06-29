@@ -41,7 +41,13 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageFile
+
+# Some NASA archive JPEGs in the wild are byte-truncated (a few trailing bytes
+# short of a clean EOI). Tolerate those so a single slightly-short download can
+# never abort the whole real eval; genuinely unreadable files are caught and
+# skipped per-image in the loop below.
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 import matplotlib
 matplotlib.use("Agg")
@@ -105,9 +111,18 @@ def main() -> None:
     panel_paths: list[Path] = []
     predictions: dict[str, dict] = {}
 
+    skipped: list[str] = []
     for img_path in images:
         stem = img_path.stem
-        rgb_full = np.array(Image.open(img_path).convert("RGB"))
+        try:
+            with Image.open(img_path) as _im:
+                _im.load()  # force full decode here so a bad file fails now
+                rgb_full = np.array(_im.convert("RGB"))
+        except Exception as e:  # genuinely unreadable file -> log + skip, never crash
+            skipped.append(img_path.name)
+            print(f"[eval_real] SKIP unreadable image {img_path.name}: "
+                  f"{type(e).__name__}: {e}")
+            continue
         rgb = fit_square(rgb_full, size=args.size, mode=args.fit)
 
         pred_p = predict(model_primary, rgb, device)
@@ -162,6 +177,11 @@ def main() -> None:
 
     (out_dir / "predictions.json").write_text(json.dumps(predictions, indent=2))
     print(f"[eval_real] wrote {out_dir/'predictions.json'}")
+    if skipped:
+        print(f"[eval_real] SKIPPED {len(skipped)} unreadable image(s): "
+              f"{', '.join(skipped)}")
+    else:
+        print(f"[eval_real] skipped 0 images (all {len(images)} decoded cleanly)")
 
 
 if __name__ == "__main__":

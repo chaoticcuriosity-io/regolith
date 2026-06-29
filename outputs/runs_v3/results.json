@@ -1,0 +1,150 @@
+{
+  "runs": {
+    "nodr_750": {
+      "best_epoch": 14,
+      "epochs_run": 22,
+      "best_val_rock_iou": 0.8590645642156969,
+      "best_val_miou": 0.9454419446138734,
+      "train_wall_s": 366.7921459674835,
+      "synth_rock_iou": 0.8593136116302051,
+      "synth_miou": 0.945542882771485,
+      "synth_class_iou": {
+        "regolith": 0.9804747455770447,
+        "rock": 0.8593136116302051,
+        "sky": 0.9968402911072053
+      },
+      "synth_rock_iou_per_frame": 0.858216345188907,
+      "real_flood_mean": 0.3965490432012649,
+      "real_flood_min": 0.13463973999023438,
+      "real_flood_max": 0.6965827941894531,
+      "real_n_images": 21,
+      "real_flood_per_image": {
+        "apollo11_lm_shadow_regolith_footprints": 0.31342315673828125,
+        "apollo11_regolith_footprint_closeup": 0.3256950378417969,
+        "apollo11_tranquility_base_wide_panorama": 0.14918899536132812,
+        "apollo12_surveyor_crater_panorama": 0.13463973999023438,
+        "apollo14_cone_crater_boulder_close": 0.348175048828125,
+        "apollo14_cone_crater_boulder_field_overview": 0.3202018737792969,
+        "apollo14_cone_crater_boulder_field_south": 0.22704315185546875,
+        "apollo14_cone_crater_boulder_group": 0.6965827941894531,
+        "apollo15_hadley_rille_boulder": 0.3675880432128906,
+        "apollo15_station2_panorama": 0.39389801025390625,
+        "apollo16_descartes_highlands_terrain": 0.5932426452636719,
+        "apollo16_shadow_rock_north_ray": 0.3169670104980469,
+        "apollo16_south_ray_boulder_close": 0.6319389343261719,
+        "apollo17_station2_terrain": 0.4945945739746094,
+        "apollo17_station5_camelot_panorama": 0.5262565612792969,
+        "apollo17_station6_boulder": 0.3213233947753906,
+        "apollo17_station6_boulder_view": 0.4013252258300781,
+        "apollo17_station6_split_rock_area": 0.5859336853027344,
+        "surveyor1_surface_shadow": 0.18834304809570312,
+        "surveyor7_surface_mosaic": 0.4944343566894531,
+        "surveyor7_terrain_ground_view": 0.496734619140625
+      }
+    },
+    "dr_750": {
+      "best_epoch": 16,
+      "epochs_run": 24,
+      "best_val_rock_iou": 0.8673231224609862,
+      "best_val_miou": 0.9484962022753146,
+      "train_wall_s": 401.1286096572876,
+      "synth_rock_iou": 0.8675362941880661,
+      "synth_miou": 0.9485811106388505,
+      "synth_class_iou": {
+        "regolith": 0.9814622751458679,
+        "rock": 0.8675362941880661,
+        "sky": 0.9967447625826173
+      },
+      "synth_rock_iou_per_frame": 0.8655543444562348,
+      "real_flood_mean": 0.3628728957403274,
+      "real_flood_min": 0.11846160888671875,
+      "real_flood_max": 0.7408523559570312,
+      "real_n_images": 21,
+      "real_flood_per_image": {
+        "apollo11_lm_shadow_regolith_footprints": 0.34363555908203125,
+        "apollo11_regolith_footprint_closeup": 0.11846160888671875,
+        "apollo11_tranquility_base_wide_panorama": 0.7408523559570312,
+        "apollo12_surveyor_crater_panorama": 0.24532699584960938,
+        "apollo14_cone_crater_boulder_close": 0.24134063720703125,
+        "apollo14_cone_crater_boulder_field_overview": 0.24930191040039062,
+        "apollo14_cone_crater_boulder_field_south": 0.15751266479492188,
+        "apollo14_cone_crater_boulder_group": 0.6290092468261719,
+        "apollo15_hadley_rille_boulder": 0.1859130859375,
+        "apollo15_station2_panorama": 0.3204917907714844,
+        "apollo16_descartes_highlands_terrain": 0.4442634582519531,
+        "apollo16_shadow_rock_north_ray": 0.3035430908203125,
+        "apollo16_south_ray_boulder_close": 0.4738197326660156,
+        "apollo17_station2_terrain": 0.4471397399902344,
+        "apollo17_station5_camelot_panorama": 0.43389129638671875,
+        "apollo17_station6_boulder": 0.34587860107421875,
+        "apollo17_station6_boulder_view": 0.35503387451171875,
+        "apollo17_station6_split_rock_area": 0.32794189453125,
+        "surveyor1_surface_shadow": 0.1797943115234375,
+        "surveyor7_surface_mosaic": 0.578094482421875,
+        "surveyor7_terrain_ground_view": 0.49908447265625
+      }
+    },
+    "dr_1500": {
+      "best_epoch": 31,
+      "epochs_run": 39,
+      "best_val_rock_iou": 0.8866602148247862,
+      "best_val_miou": 0.9561193476738828,
+      "train_wall_s": 1163.318485736847,
+      "synth_rock_iou": 0.8870075538399347,
+      "synth_miou": 0.9562506934504644,
+      "synth_class_iou": {
+        "regolith": 0.9843049615497602,
+        "rock": 0.8870075538399347,
+        "sky": 0.9974395649616984
+      },
+      "synth_rock_iou_per_frame": 0.885389355688045,
+      "real_flood_mean": 0.3572907220749628,
+      "real_flood_min": 0.15116119384765625,
+      "real_flood_max": 0.7115364074707031,
+      "real_n_images": 21,
+      "real_flood_per_image": {
+        "apollo11_lm_shadow_regolith_footprints": 0.26113128662109375,
+        "apollo11_regolith_footprint_closeup": 0.16801071166992188,
+        "apollo11_tranquility_base_wide_panorama": 0.7115364074707031,
+        "apollo12_surveyor_crater_panorama": 0.19925308227539062,
+        "apollo14_cone_crater_boulder_close": 0.2174530029296875,
+        "apollo14_cone_crater_boulder_field_overview": 0.2975196838378906,
+        "apollo14_cone_crater_boulder_field_south": 0.2586631774902344,
+        "apollo14_cone_crater_boulder_group": 0.5618667602539062,
+        "apollo15_hadley_rille_boulder": 0.2749595642089844,
+        "apollo15_station2_panorama": 0.2894706726074219,
+        "apollo16_descartes_highlands_terrain": 0.474945068359375,
+        "apollo16_shadow_rock_north_ray": 0.2861289978027344,
+        "apollo16_south_ray_boulder_close": 0.382110595703125,
+        "apollo17_station2_terrain": 0.4989204406738281,
+        "apollo17_station5_camelot_panorama": 0.36803436279296875,
+        "apollo17_station6_boulder": 0.29467010498046875,
+        "apollo17_station6_boulder_view": 0.33329010009765625,
+        "apollo17_station6_split_rock_area": 0.3735008239746094,
+        "surveyor1_surface_shadow": 0.15116119384765625,
+        "surveyor7_surface_mosaic": 0.5518913269042969,
+        "surveyor7_terrain_ground_view": 0.5485877990722656
+      }
+    }
+  },
+  "baselines": {
+    "v1": {
+      "dr_1500": {
+        "synth_rock_iou": 0.815,
+        "real_flood_pct": 52.0
+      }
+    },
+    "v2": {
+      "nodr_750": {
+        "synth_rock_iou": 0.8025
+      },
+      "dr_750": {
+        "synth_rock_iou": 0.8486
+      },
+      "dr_1500": {
+        "synth_rock_iou": 0.8521,
+        "real_flood_pct": 83.0
+      }
+    }
+  }
+}
