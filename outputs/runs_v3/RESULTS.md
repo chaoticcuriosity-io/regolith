@@ -2,7 +2,7 @@
 
 SegFormer-b0 (`nvidia/mit-b0`), 3-run domain-randomization ablation on the v3 dataset (realistic cratered/displaced dark-regolith ground). Hyperparameters identical to v1/v2: `--epochs 40 --patience 8 --lr 6e-5 --batch 8 --seed 0`, best checkpoint selected on validation rock-IoU (val split = `test_photoreal`, 300 frames).
 
-**HEADLINE: YES — the real flood DROPPED to 35.7% for v3 dr_1500, below the v2 baseline of ~83%** (v1 was ~52%).
+**HEADLINE: YES — the real flood DROPPED to 35.7% for v3 dr_1500, far below v2 (72.6%) and v1 (44.0%)** — all three measured apples-to-apples with the same hardened `eval/eval_real.py` on the same 21-image NASA set. (v1/v2's *original* 7-image floods were ~52% / ~83%; see the cross-version block below.)
 
 ## v3 per-run results
 
@@ -12,13 +12,17 @@ SegFormer-b0 (`nvidia/mit-b0`), 3-run domain-randomization ablation on the v3 da
 | dr_750 | first 750 of train_dr (DR) | 16 | 0.9486 | 0.8675 | 0.981/0.868/0.997 | 36.3% | 6.7 min |
 | dr_1500 | full train_dr (1500, DR) | 31 | 0.9563 | 0.8870 | 0.984/0.887/0.997 | 35.7% | 19.4 min |
 
-## Cross-version comparison (dr_1500)
+## Cross-version comparison (dr_1500) — apples-to-apples, same 21 images
 
-| version | synth rock-IoU (dr_1500) | real flood (dr_1500) | note |
-|---|---|---|---|
-| v1 | 0.815 | ~52% | first synthetic stage |
-| v2 | 0.852 | ~83% | photoreal rocks collapsed rock/regolith boundary |
-| **v3** | **0.887** | **35.7%** | realistic cratered dark-regolith ground |
+All three `dr_1500` checkpoints were scored with the **same hardened `eval/eval_real.py`** on the **same 21-image** NASA set (`eval/real_images_v3`, 0 skipped), so the flood column below is an exact same-set comparison — not a directional one across different image pools. Flood = mean fraction of pixels predicted `rock` (lower better). `model.py` (SegFormer-b0) is identical across versions, so the v1/v2 checkpoints load and run cleanly under the current eval.
+
+| version | synth rock-IoU (dr_1500) | real flood (dr_1500, same 21 imgs) | worst frame (21-img set) | note |
+|---|---|---|---|---|
+| v1 | 0.815 | 44.0% | apollo16_south_ray_boulder_close (80.1%) | first synthetic stage |
+| v2 | 0.852 | 72.6% | apollo16_south_ray_boulder_close (99.5%) | photoreal rocks collapsed rock/regolith boundary |
+| **v3** | **0.887** | **35.7%** | apollo11_tranquility_base_wide_panorama (71.2%) | realistic cratered dark-regolith ground |
+
+**Provenance.** v1 and v2 were *originally* evaluated on an older 7-image set (`eval/real_images`), where they flooded ~52% and ~83% respectively — those are the numbers that appear in chapters 04/06. Re-running the exact same v1/v2 checkpoints on the harder 21-image set with the current eval gives the 44.0% / 72.6% above. v3 dr_1500 = 35.7% is unchanged (it was always measured on the 21-image set). The ordering is identical and the conclusion is stronger: v2 floods real surfaces badly (72.6%), and v3 fixes it (35.7%), landing below even v1's crude baseline (44.0%).
 
 ## Synthetic rock-IoU: v2 vs v3 (all runs)
 

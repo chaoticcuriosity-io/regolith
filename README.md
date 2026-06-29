@@ -59,11 +59,13 @@ To run anything yourself, see the ops manual: [`docs/dgx-spark-regolith-manual.m
 
 **v3 is the headline: we moved the fidelity from the rocks to the ground, and the real-world flood collapsed.** The cross-version arc, deployed `dr_1500` checkpoint each time, synthetic rock-IoU on the held-out `test_photoreal` split and false-rock flood on real NASA public-domain Apollo + Surveyor photographs:
 
-| Version | rocks | ground | synth rock-IoU | real flood |
+| Version | rocks | ground | synth rock-IoU | real flood (same 21 images) |
 |---------|-------|--------|:--------------:|:----------:|
-| v1 | low-poly blobs | smooth heightfield | 0.815 | ~52% |
-| v2 | photoreal basalt | smooth heightfield | 0.852 | ~83% |
+| v1 | low-poly blobs | smooth heightfield | 0.815 | 44.0% |
+| v2 | photoreal basalt | smooth heightfield | 0.852 | 72.6% |
 | **v3** | power-law basalt | **cratered dark displaced** | **0.887** | **35.7%** |
+
+The flood column is an **exact, apples-to-apples comparison**: all three `dr_1500` checkpoints are scored with the same hardened eval on the same 21 NASA photographs (`eval/real_images_v3`), not on different image pools. (For provenance, v1 and v2 were *originally* measured on an older 7-image set at ~52% / ~83% — the numbers chapters 04/06 report; the same checkpoints re-run on the harder 21-image set give 44.0% / 72.6%.)
 
 v1→v2 raised the synthetic score and made real transfer *worse* — the failure. v2→v3 raised the synthetic score **and** dropped the real flood below even v1, by changing one design decision: the realism moved off the rocks and onto the **ground**.
 

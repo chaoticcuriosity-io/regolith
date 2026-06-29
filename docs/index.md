@@ -17,11 +17,13 @@ First we made the synthetic **rocks** photoreal (v2). The synthetic benchmark we
 
 So we moved it to the **ground** (v3) — a realistic cratered, dark, displaced, normal-mapped regolith floor, plus power-law rock sizes and harsh lunar lighting. With both rock and ground now rough inside the simulator, the texture shortcut no longer separates the classes, so the model had to learn shape, shadow, and scale — cues that transfer. **It worked:** synthetic rock-IoU rose to **0.887** and the real-photo flood **dropped to 35.7%**, below both prior builds. For the first time the synthetic and real arrows point the same way.
 
-| Version | rocks | ground | synth rock-IoU | real flood |
+| Version | rocks | ground | synth rock-IoU | real flood (same 21 images) |
 |---------|-------|--------|:--------------:|:----------:|
-| v1 | low-poly blobs | smooth heightfield | 0.815 | ~52% |
-| v2 | photoreal basalt | smooth heightfield | 0.852 | ~83% |
+| v1 | low-poly blobs | smooth heightfield | 0.815 | 44.0% |
+| v2 | photoreal basalt | smooth heightfield | 0.852 | 72.6% |
 | **v3** | power-law basalt | **cratered dark displaced** | **0.887** | **35.7%** |
+
+The flood column is an exact same-set comparison — all three `dr_1500` checkpoints scored with the same hardened eval on the same 21 NASA photographs. (v1/v2's *original* 7-image floods were ~52% / ~83%; re-run on the 21-image set they are 44.0% / 72.6%.)
 
 The series closes with a 1920×1080 cinematic RTX flythrough of NASA's **VIPER** rover crossing the v3 boulder field — forward hazard-cam with the deployed model's predictions overlaid live, plus a third-person picture-in-picture. The overlay is clean *and* finally backed by a real-photo number that moved the right way.
 
