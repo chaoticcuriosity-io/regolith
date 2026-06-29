@@ -47,7 +47,7 @@ The sun stays a `UsdLux.DistantLight` with crisp, atmosphere-free shadow edges, 
 
 ### VIPER
 
-For the render, the hero rover is a model of **VIPER** (Volatiles Investigating Polar Exploration Rover) — NASA's lunar south-pole rover, gold chassis, blue solar panels, mast camera. The render shows two synchronized views: VIPER's **forward hazard-cam**, with the live segmentation overlay, and a **third-person picture-in-picture** that watches the rover thread the boulder field from outside. It is the same rover-eye perception task the whole series is about, now with a body attached to the camera.
+For the render, the hero rover is a model of **VIPER** (Volatiles Investigating Polar Exploration Rover) — NASA's lunar south-pole rover, gold chassis, blue solar panels, mast camera. The render is VIPER's **forward hazard-cam**, with the live segmentation overlay — a rover's-eye hazard HUD threading the boulder field from the driver's seat. It is the same rover-eye perception task the whole series is about, now with a body attached to the camera (seen in the path-traced beauty plate below).
 
 ![Path-traced beauty plate — the VIPER rover (gold chassis, blue solar panels, mast camera) parked on a heavily cratered dark-gray regolith floor, flanked by large angular boulders and rounded basalt masses, harsh single-source sun casting long hard shadows against a black sky. No overlay — the raw v3 scene](assets/render-v3-beauty.png)
 
@@ -105,9 +105,9 @@ You can see it in the overlay. On the v3 forward hazard-cam, the dark cratered r
 
 ![Path-traced forward plate with the live dr_1500 overlay — crisp ray-traced basalt boulders segmented as solid red rock masses with outlined edges, set on a dark, densely cratered, rough regolith floor that carries only the faint green safe-regolith tint; the rough ground that flooded v2 with false rock is left correctly un-flooded](assets/render-v3-overlay-pt.png)
 
-![Forward VIPER hazard-cam still with the live dr_1500 overlay — a dark, heavily cratered regolith floor (carrying only the faint green "safe regolith" tint) with discrete basalt boulders picked out in red and outlined, from large near-field masses down to scattered pebbles; a third-person VIPER picture-in-picture sits top-right. The rough ground is correctly left un-flooded](assets/render-v3-hero-1.png)
+![Forward VIPER hazard-cam still with the live dr_1500 overlay — a dark, heavily cratered regolith floor (carrying only the faint green "safe regolith" tint) with discrete basalt boulders picked out in red and outlined, from large near-field masses down to scattered pebbles. The rough ground is correctly left un-flooded](assets/render-v3-hero-1.png)
 
-![Closest-approach hazard-cam still — VIPER nearly abreast of three large boulders (left, center, and a near close-up at right), each segmented as a solid red rock mass with clean outlines, while the cratered regolith between them stays green and un-flooded; the third-person inset shows the rover threading the gap between the boulders](assets/render-v3-hero-2.png)
+![Closest-approach hazard-cam still — VIPER nearly abreast of three large boulders (left, center, and a near close-up at right), each segmented as a solid red rock mass with clean outlines, while the cratered regolith between them stays green and un-flooded](assets/render-v3-hero-2.png)
 
 ---
 
@@ -143,9 +143,9 @@ The fix was not to chase the leak inside the process but to design around it: a 
 
 ## The render: the loop, closed
 
-The v3 render is the cinematic payoff and the live proof that the pipeline runs end to end. It is a **1920 × 1080 flythrough** of VIPER crossing the v3 cratered-regolith boulder field, with three things composited on every frame: the **forward hazard-cam** carrying the live `dr_1500` segmentation overlay (rock = red + outline, safe regolith = faint green, sky untouched), a **third-person picture-in-picture** watching the rover from outside, and the Chaotic Curiosity branding and legend. The overlay is genuine live inference on each rendered frame — the same checkpoint, the same path the synthetic and real evaluations used.
+The v3 render is the cinematic payoff and the live proof that the pipeline runs end to end. It is a **1920 × 1080 flythrough** of VIPER crossing the v3 cratered-regolith boulder field, with two things composited on every frame: the **forward hazard-cam** carrying the live `dr_1500` segmentation overlay (rock = red + outline, safe regolith = faint green, sky untouched), and the Chaotic Curiosity branding and legend. The overlay is genuine live inference on each rendered frame — the same checkpoint, the same path the synthetic and real evaluations used.
 
-![Preview animation of the v3 flythrough — VIPER's forward hazard-cam dollies through the cratered dark-regolith boulder field with the live dr_1500 red rock overlay tracking boulders of every scale, a third-person VIPER picture-in-picture inset top-right, and the cratered ground correctly left green and un-flooded throughout](assets/render-v3-preview.gif)
+![Preview animation of the v3 flythrough — VIPER's forward hazard-cam dollies through the cratered dark-regolith boulder field with the live dr_1500 red rock overlay tracking boulders of every scale, and the cratered ground correctly left green and un-flooded throughout](assets/render-v3-preview.gif)
 
 The full-quality 1080p version is [`render-v3-preview.mp4`](assets/render-v3-preview.mp4); the GIF above is the inline preview. Four path-traced hero stills — [hero-1](assets/render-v3-hero-1.png) (opening), [hero-2](assets/render-v3-hero-2.png) (the closest-approach money shot), [hero-3](assets/render-v3-hero-3.png), [hero-4](assets/render-v3-hero-4.png) — plus two raw path-traced VIPER beauty plates ([beauty](assets/render-v3-beauty.png), [beauty2](assets/render-v3-beauty2.png)) and a path-traced forward plate with the overlay ([overlay-pt](assets/render-v3-overlay-pt.png)) are all committed in `assets/`.
 
@@ -190,7 +190,7 @@ ssh spark "docker exec regolith-train-v3 bash -lc \
      --image-dir eval/real_images_v3 --label dr_1500 --out outputs/eval_v3/eval_real/dr_1500'"
 ```
 
-The render reuses the three-stage pipeline of chapter 05 (render → overlay → assemble), pointed at the v3 checkpoint `outputs/runs_v3/dr_1500/best.pt` and the v3 scene, with the VIPER body and third-person picture-in-picture added to the composite stage. The aggregated numbers land in [`outputs/runs_v3/RESULTS.md`](../../outputs/runs_v3/RESULTS.md) (`make_results_v3.py`). Datasets, checkpoints, and the full-res MP4 stay on the Spark — heavy binaries, excluded from git. The committed artifacts are the results files, the figures, and the render assets in `docs/reports/assets/`.
+The render reuses the three-stage pipeline of chapter 05 (render → overlay → assemble), pointed at the v3 checkpoint `outputs/runs_v3/dr_1500/best.pt` and the v3 scene (with the VIPER rover authored onto the cratered surface), and the live `dr_1500` overlay composited on the forward hazard-cam. The aggregated numbers land in [`outputs/runs_v3/RESULTS.md`](../../outputs/runs_v3/RESULTS.md) (`make_results_v3.py`). Datasets, checkpoints, and the full-res MP4 stay on the Spark — heavy binaries, excluded from git. The committed artifacts are the results files, the figures, and the render assets in `docs/reports/assets/`.
 
 ---
 

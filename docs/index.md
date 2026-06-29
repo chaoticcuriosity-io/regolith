@@ -25,7 +25,7 @@ So we moved it to the **ground** (v3) — a realistic cratered, dark, displaced,
 
 The flood column is an exact same-set comparison — all three `dr_1500` checkpoints scored with the same hardened eval on the same 21 NASA photographs. (v1/v2's *original* 7-image floods were ~52% / ~83%; re-run on the 21-image set they are 44.0% / 72.6%.)
 
-The series closes with a 1920×1080 cinematic RTX flythrough of NASA's **VIPER** rover crossing the v3 boulder field — forward hazard-cam with the deployed model's predictions overlaid live, plus a third-person picture-in-picture. The overlay is clean *and* finally backed by a real-photo number that moved the right way.
+The series closes with a 1920×1080 cinematic RTX flythrough of NASA's **VIPER** rover crossing the v3 boulder field — a rover's-eye hazard HUD: the forward hazard-cam with the deployed model's predictions overlaid live. The overlay is clean *and* finally backed by a real-photo number that moved the right way.
 
 ![Preview animation — v3 VIPER flythrough with live hazard overlay over the cratered dark-regolith boulder field](reports/assets/render-v3-preview.gif)
 
