@@ -21,7 +21,7 @@ Kaggle: [romainpessia/artificial-lunar-rocky-landscape-dataset](https://www.kagg
 **Why this dataset?** It gives us two independent cross-checks:
 
 1. *Domain-gap cross-check* — `images/render/` are photorealistic synthetic renders from Terragen (a different renderer/provenance than our Isaac Sim / Replicator renders). If the model generalizes across synthetic renderers, it is likely learning geometry rather than renderer-specific artifacts.
-2. *True sim-to-real test* — `real_moon_images/` contains ~36 actual photographs from the Chang'e 3 lunar rover (PCAM + TCAM cameras). This is the genuine sim-to-real evaluation set — real dirt, real rocks, real cameras.
+2. *True sim-to-real test* — `real_moon_images/` contains ~36 actual photographs from the Chang'e 3 lunar rover (PCAM + TCAM cameras). This is the genuine sim-to-real evaluation set (not yet run; see ch. 04) — real dirt, real rocks, real cameras.
 
 ---
 
